@@ -1,6 +1,6 @@
 # SportMate Backend
 
-ASP.NET Core Web API foundation targeting .NET 10 LTS, with Clean Architecture projects, EF Core/Pomelo for MySQL, development Swagger, JWT authentication with rotating refresh tokens, and user profile endpoints.
+ASP.NET Core Web API foundation targeting .NET 10 LTS, with Clean Architecture projects, EF Core/Pomelo for MySQL, development Swagger, JWT authentication with rotating refresh tokens, user profile endpoints, and court management.
 
 ## Requirements
 
@@ -67,6 +67,9 @@ JSON uses snake_case property names. Errors are RFC 7807 problem details; valida
 | POST | `/api/v1/auth/logout` | Bearer | 204 | 400, 401 |
 | GET | `/api/v1/users/me` | Bearer | 200 user | 401 |
 | PUT | `/api/v1/users/me` | Bearer | 200 user | 400, 401 |
+| POST | `/api/v1/courts` | Bearer, Admin | 201 court + `Location` | 400, 401, 403 |
+| GET | `/api/v1/courts/{id}` | Bearer, Admin or assigned CourtOwner | 200 court | 401, 403, 404 |
+| PUT | `/api/v1/courts/{id}` | Bearer, Admin or assigned CourtOwner | 200 court | 400, 401, 403, 404 |
 
 ### Register
 
@@ -127,6 +130,51 @@ Revokes the given refresh token if it belongs to the caller. Always returns 204 
 - `GET /api/v1/users/me` returns the user object above.
 - `PUT /api/v1/users/me` with `{ "display_name": "New Name", "phone": "0912345678" }` replaces the editable fields; omitting `phone` clears it. Any other fields (`email`, `status`, `id`, password) are ignored. Email change is not supported yet.
 
+### Courts
+
+A court is one physical court. Court rules are in [docs/BUSINESS_RULES.md](../docs/BUSINESS_RULES.md) sections 5, 6 and 8.
+
+| Caller | POST `/courts` | GET `/courts/{id}` | PUT `/courts/{id}` |
+|---|---|---|---|
+| Anonymous | 401 | 401 | 401 |
+| User | 403 | 403 | 403 |
+| CourtOwner, assigned owner | 403 | 200 | 200 (cannot change `owner_id`) |
+| CourtOwner, another owner's court | 403 | 403 | 403 |
+| Admin | 201 | 200 | 200 |
+
+Ownership is checked against the stored `courts.owner_id` and the caller's id from the access token, using the caller's current database role. Values in the request body never grant access. A CourtOwner who is demoted to User loses access at once; the court stays as it is until an Admin reassigns it.
+
+Create (Admin only):
+
+```json
+POST /api/v1/courts
+{ "owner_id": "<CourtOwner user id>", "name": "Tennis Court 01", "description": "Outdoor hard court", "address": "1 Tran Phu, Ba Dinh", "city": "Ha Noi", "latitude": 21.028511, "longitude": 105.804817, "time_zone_id": "Asia/Ho_Chi_Minh" }
+```
+
+Update (full replacement; omitting `description` clears it, omitting `owner_id` keeps the owner):
+
+```json
+PUT /api/v1/courts/{id}
+{ "name": "Tennis Court 01", "description": null, "address": "1 Tran Phu, Ba Dinh", "city": "Ha Noi", "latitude": 21.028511, "longitude": 105.804817, "time_zone_id": "Asia/Ho_Chi_Minh", "status": "inactive", "owner_id": "<optional, Admin only>" }
+```
+
+Court object returned by all three endpoints:
+
+```json
+{ "id": "…", "owner_id": "…", "name": "Tennis Court 01", "description": "Outdoor hard court", "address": "1 Tran Phu, Ba Dinh", "city": "Ha Noi", "latitude": 21.028511, "longitude": 105.804817, "time_zone_id": "Asia/Ho_Chi_Minh", "status": "active", "created_at_utc": "…", "updated_at_utc": "…" }
+```
+
+Validation (400, errors keyed by field):
+
+- `name` required, max 150; `address` required, max 300; `city` required, max 100; `description` optional, max 1000. Text is trimmed.
+- `latitude` -90..90 and `longitude` -180..180, required, at most 6 decimal places (`DECIMAL(9,6)`).
+- `time_zone_id` required IANA identifier known to the runtime (for example `Asia/Ho_Chi_Minh`); Windows ids are rejected.
+- `status` (update only) required, `active` or `inactive`. Both directions are allowed; setting the current status is a no-op. New courts start `active`.
+- `owner_id` must be an existing, active user with the `CourtOwner` role (not `User`, not `Admin`). Required on create. On update, a different `owner_id` from a CourtOwner is 403.
+- `id`, `created_at_utc` and `updated_at_utc` in the body are ignored. `updated_at_utc` changes only when a value actually changes.
+
+There is no court listing/search and no delete; setting `status` to `inactive` takes a court offline.
+
 ### Tokens
 
 - Access token: HS256 JWT with `sub` (user id), `email`, `role`, `jti`, `iat`, `nbf`, `exp`, `iss`, `aud`. Validated with 30 seconds clock skew.
@@ -159,7 +207,7 @@ The change applies to the user's next request; no re-login is needed. Being a Co
 
 ## EF Core migrations
 
-The initial migration `InitialCreate` lives in `src/SportMate.Infrastructure/Persistence/Migrations`. Apply it to the configured database from the repository root:
+Migrations live in `src/SportMate.Infrastructure/Persistence/Migrations`: `InitialCreate`, then `AddCourtCity` (adds `courts.city VARCHAR(100) NOT NULL`; existing rows get an empty string). Apply them to the configured database from the repository root:
 
 ```powershell
 dotnet ef database update --project backend/src/SportMate.Infrastructure --startup-project backend/src/SportMate.API
@@ -176,7 +224,7 @@ MySQL 8.0.16 or later is required (CHECK constraints are enforced from that vers
 ## Project layout
 
 - `src/SportMate.Domain`: entities, enums and domain invariants.
-- `src/SportMate.Application`: use cases (`AuthService`, `UserService`), request/response DTOs, validation, and the interfaces Infrastructure implements.
+- `src/SportMate.Application`: use cases (`AuthService`, `UserService`, `CourtService`), request/response DTOs, validation, and the interfaces Infrastructure implements.
 - `src/SportMate.Infrastructure`: `SportMateDbContext`, entity configurations, migrations, MySQL registration, password hashing and JWT creation.
 - `src/SportMate.API`: controllers, JWT validation, Swagger, and exception-to-problem-details middleware.
 - `tests/`: unit and API integration test projects.

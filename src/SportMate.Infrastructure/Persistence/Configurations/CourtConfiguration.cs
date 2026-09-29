@@ -19,6 +19,7 @@ internal sealed class CourtConfiguration : IEntityTypeConfiguration<Court>
         builder.Property(x => x.Name).HasMaxLength(Court.NameMaxLength).IsRequired();
         builder.Property(x => x.Description).HasMaxLength(Court.DescriptionMaxLength);
         builder.Property(x => x.Address).HasMaxLength(Court.AddressMaxLength).IsRequired();
+        builder.Property(x => x.City).HasMaxLength(Court.CityMaxLength).IsRequired();
         builder.Property(x => x.Latitude).HasPrecision(9, 6).IsRequired();
         builder.Property(x => x.Longitude).HasPrecision(9, 6).IsRequired();
         builder.Property(x => x.TimeZoneId).HasMaxLength(Court.TimeZoneIdMaxLength).IsRequired();
@@ -26,7 +27,8 @@ internal sealed class CourtConfiguration : IEntityTypeConfiguration<Court>
         builder.Property(x => x.CreatedAtUtc).IsRequired();
         builder.Property(x => x.UpdatedAtUtc).IsRequired();
 
-        // The owner is a user with the CourtOwner role; there is no separate owner table.
+        // The owner is a user with the CourtOwner role (checked by the application); there is no
+        // separate owner table.
         builder.HasOne(x => x.Owner)
             .WithMany()
             .HasForeignKey(x => x.OwnerId)

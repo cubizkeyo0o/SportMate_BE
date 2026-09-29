@@ -20,6 +20,11 @@ public sealed class AuthenticationFailedException(string message) : Exception(me
 public sealed class ForbiddenException(string message) : Exception(message);
 
 /// <summary>
+/// The requested resource does not exist. Maps to 404.
+/// </summary>
+public sealed class NotFoundException(string message) : Exception(message);
+
+/// <summary>
 /// The request conflicts with existing state. Maps to 409.
 /// </summary>
 public sealed class ConflictException(string message) : Exception(message);

@@ -1,5 +1,6 @@
 using Microsoft.Extensions.DependencyInjection;
 using SportMate.Application.Auth;
+using SportMate.Application.Courts;
 using SportMate.Application.Users;
 
 namespace SportMate.Application;
@@ -10,6 +11,7 @@ public static class DependencyInjection
     {
         services.AddScoped<AuthService>();
         services.AddScoped<UserService>();
+        services.AddScoped<CourtService>();
         return services;
     }
 }

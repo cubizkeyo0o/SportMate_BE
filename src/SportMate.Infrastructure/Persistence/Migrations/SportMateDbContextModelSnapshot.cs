@@ -112,6 +112,12 @@ namespace SportMate.Infrastructure.Persistence.Migrations
                         .HasColumnType("varchar(300)")
                         .HasColumnName("address");
 
+                    b.Property<string>("City")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("varchar(100)")
+                        .HasColumnName("city");
+
                     b.Property<DateTime>("CreatedAtUtc")
                         .HasColumnType("datetime(6)")
                         .HasColumnName("created_at_utc");

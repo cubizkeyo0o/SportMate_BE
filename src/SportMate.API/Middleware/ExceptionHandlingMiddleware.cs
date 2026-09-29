@@ -43,6 +43,7 @@ public sealed class ExceptionHandlingMiddleware(
         },
         AuthenticationFailedException => Problem(StatusCodes.Status401Unauthorized, exception.Message),
         ForbiddenException => Problem(StatusCodes.Status403Forbidden, exception.Message),
+        NotFoundException => Problem(StatusCodes.Status404NotFound, exception.Message),
         ConflictException => Problem(StatusCodes.Status409Conflict, exception.Message),
         DomainException => Problem(StatusCodes.Status422UnprocessableEntity, exception.Message),
         _ => Problem(StatusCodes.Status500InternalServerError, "An unexpected error occurred.")
