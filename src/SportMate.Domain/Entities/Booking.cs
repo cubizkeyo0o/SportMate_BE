@@ -23,6 +23,11 @@ public sealed class Booking : Entity
     public const string HoldExpiredReason = "Hold expired";
 
     /// <summary>
+    /// Cancellation reason recorded when payment is attempted for an unpaid booking that has already started.
+    /// </summary>
+    public const string StartPassedReason = "Booking start time has passed";
+
+    /// <summary>
     /// Statuses that can block availability of the physical court. A Pending booking blocks only while
     /// its hold is running (see <see cref="BlocksAvailabilityAt"/>).
     /// </summary>
@@ -142,7 +147,7 @@ public sealed class Booking : Entity
     }
 
     /// <summary>
-    /// Mock payment: Pending → Confirmed while the hold is running.
+    /// Mock payment: Pending → Confirmed while the hold is running and before the booking starts.
     /// </summary>
     public void Confirm(TimeSpan holdDuration, DateTime utcNow)
     {
@@ -153,7 +158,30 @@ public sealed class Booking : Entity
             throw new DomainException("The hold of this booking has expired.");
         }
 
+        if (utcNow >= StartsAtUtc)
+        {
+            throw new DomainException("The booking has already started, so it can no longer be paid.");
+        }
+
         Status = BookingStatus.Confirmed;
+        UpdatedAtUtc = utcNow;
+    }
+
+    /// <summary>
+    /// Pending → Cancelled for an unpaid booking whose start time has been reached; it can never be paid.
+    /// </summary>
+    public void CancelUnpaidAfterStart(DateTime utcNow)
+    {
+        Guard.Utc(utcNow, nameof(utcNow));
+        EnsureStatus(BookingStatus.Pending, "Only pending bookings can be cancelled for being unpaid.");
+        if (utcNow < StartsAtUtc)
+        {
+            throw new DomainException("The booking has not started yet.");
+        }
+
+        Status = BookingStatus.Cancelled;
+        CancellationReason = StartPassedReason;
+        CancelledAtUtc = utcNow;
         UpdatedAtUtc = utcNow;
     }
 

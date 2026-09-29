@@ -315,7 +315,7 @@ Booking object returned by every booking endpoint:
 `status` is `pending`, `confirmed`, `cancelled`, `completed` or `no_show`. `hold_expires_at_utc` (`created_at_utc` + hold duration) is present only while Pending. `local_*` are the court's wall-clock times.
 
 - **Hold:** a new booking is `pending` and blocks the court for `Booking:HoldDurationMinutes` (15). An expired hold is cancelled with reason `Hold expired` the next time bookings of that court or user are read or changed; there is no background job.
-- **Pay (mock):** `POST /bookings/{id}/pay` has no body and takes no money; it only turns a Pending booking with a running hold into `confirmed`. Booker only (Admin/CourtOwner get 403). Expired hold, or a booking that is not Pending: 400 on `status`.
+- **Pay (mock):** `POST /bookings/{id}/pay` has no body and takes no money; it only turns a Pending booking with a running hold **whose start time has not been reached** into `confirmed`. Booker only (Admin/CourtOwner get 403). 400 on `status` for an expired hold (booking cancelled, reason `Hold expired`), a Pending booking at or after its start (booking cancelled, reason `Booking start time has passed`), or a booking that is not Pending.
 - **Cancel:** `POST /bookings/{id}/cancel` with optional `{ "reason": "…" }` (max 500). Pending or Confirmed, before the start. 400 on `status` otherwise.
 - **Complete / no-show:** `POST /bookings/{id}/complete` and `/no-show`, no body. Confirmed bookings after their end, by the court's owner or an Admin (the booker gets 403).
 - **Visibility:** a booking someone may not see is 404. `GET /bookings/me` and `GET /courts/{courtId}/bookings` are ordered by start time.
@@ -329,7 +329,7 @@ Create validation (400 unless noted):
 - `total_price = price_per_hour × minutes / 60`, rounded to 2 decimals away from zero; it must fit `DECIMAL(10,2)`.
 - Overlap with a Confirmed booking or a running hold on the **same physical court** (any sport): 409.
 
-Concurrency: creation and every status change run in a `READ COMMITTED` transaction that first locks the court row with `SELECT … FOR UPDATE`, then re-reads the court, court sport, sport and hours, expires stale holds and checks for overlaps. The conflict query uses the existing `(court_id, starts_at_utc, ends_at_utc)` index.
+Concurrency: every booking write runs in a `READ COMMITTED` transaction that first locks the booking's court row with `SELECT … FOR UPDATE` and re-reads what it changes: creation (re-reads the court, court sport, sport and hours, expires stale holds, checks overlaps), pay, cancel, complete, no-show, and the hold expiry done before reads (which only takes locks, in a fixed court order, when a read-only check finds expired holds). So exactly one transition out of Pending can win for a booking. The conflict query uses the existing `(court_id, starts_at_utc, ends_at_utc)` index.
 
 ### Tokens
 

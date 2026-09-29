@@ -14,13 +14,18 @@ namespace SportMate.Application.Bookings;
 /// checked against the database on every request); the booker is always the caller.
 /// </summary>
 /// <remarks>
-/// Every change runs in a READ COMMITTED transaction after locking the physical court row
-/// (<see cref="IApplicationDbContext.LockCourtForUpdateAsync"/>), so bookings of one court are checked and
-/// written one at a time. Expired holds are cancelled lazily whenever bookings are read or changed; there is
-/// no background job.
+/// Invariant: every write to a booking (creation and every status change, including hold expiry) happens in a
+/// READ COMMITTED transaction that holds the booking's physical court row lock
+/// (<see cref="IApplicationDbContext.LockCourtForUpdateAsync"/>), and the booking is re-read after the lock is
+/// taken. Changes to the bookings of one court are therefore strictly serialized, so exactly one transition out
+/// of Pending (to Confirmed or to Cancelled) can win. Expired holds are cancelled lazily whenever bookings are
+/// read or changed; there is no background job.
 /// </remarks>
 public sealed class BookingService(IApplicationDbContext db, TimeProvider timeProvider, BookingOptions options)
 {
+    private const string StartPassedMessage =
+        "The booking start time has passed, so it was cancelled and can no longer be paid.";
+
     private TimeSpan Hold => options.HoldDuration;
 
     private DateTime UtcNow => timeProvider.GetUtcNow().UtcDateTime;
@@ -80,7 +85,7 @@ public sealed class BookingService(IApplicationDbContext db, TimeProvider timePr
 
         errors.ThrowIfAny();
 
-        await ExpireHoldsAsync(b => b.CourtId == courtId, now, cancellationToken);
+        await ExpireHoldsUnderLockAsync([courtId], b => b.CourtId == courtId, now, cancellationToken);
         var cutoff = now - Hold;
         var conflict = await db.Bookings.AnyAsync(
             b => b.CourtId == courtId
@@ -108,7 +113,7 @@ public sealed class BookingService(IApplicationDbContext db, TimeProvider timePr
         CancellationToken cancellationToken)
     {
         await GetAccessAsync(bookingId, actorId, actorRole, cancellationToken);
-        await ExpireHoldsAsync(b => b.Id == bookingId, UtcNow, cancellationToken);
+        await ExpireHoldsAsync(b => b.Id == bookingId, cancellationToken);
         var booking = await WithDetails(db.Bookings.AsNoTracking()).FirstAsync(b => b.Id == bookingId, cancellationToken);
         return BookingResponse.From(booking, Hold);
     }
@@ -118,7 +123,7 @@ public sealed class BookingService(IApplicationDbContext db, TimeProvider timePr
     /// </summary>
     public async Task<IReadOnlyList<BookingResponse>> ListMineAsync(Guid userId, CancellationToken cancellationToken)
     {
-        await ExpireHoldsAsync(b => b.UserId == userId, UtcNow, cancellationToken);
+        await ExpireHoldsAsync(b => b.UserId == userId, cancellationToken);
         return await ListAsync(b => b.UserId == userId, cancellationToken);
     }
 
@@ -132,12 +137,13 @@ public sealed class BookingService(IApplicationDbContext db, TimeProvider timePr
         CancellationToken cancellationToken)
     {
         await CourtAccess.EnsureCanManageAsync(db, courtId, actorId, actorRole, cancellationToken);
-        await ExpireHoldsAsync(b => b.CourtId == courtId, UtcNow, cancellationToken);
+        await ExpireHoldsAsync(b => b.CourtId == courtId, cancellationToken);
         return await ListAsync(b => b.CourtId == courtId, cancellationToken);
     }
 
     /// <summary>
-    /// Mock payment: Pending → Confirmed while the hold is running. Only the booker may pay.
+    /// Mock payment: Pending → Confirmed while the hold is running and before the booking starts. Only the booker
+    /// may pay. An unpaid booking whose start time has been reached is cancelled instead.
     /// </summary>
     public Task<BookingResponse> PayAsync(Guid bookingId, Guid actorId, UserRole actorRole, CancellationToken cancellationToken) =>
         ChangeAsync(bookingId, actorId, actorRole, (booking, access, now) =>
@@ -149,11 +155,17 @@ public sealed class BookingService(IApplicationDbContext db, TimeProvider timePr
 
             switch (booking.Status)
             {
+                case BookingStatus.Pending when now >= booking.StartsAtUtc:
+                    // Saved even though the request fails (see ChangeAsync).
+                    booking.CancelUnpaidAfterStart(now);
+                    throw StatusError(StartPassedMessage);
                 case BookingStatus.Pending:
                     booking.Confirm(Hold, now);
                     break;
                 case BookingStatus.Cancelled when booking.CancellationReason == Booking.HoldExpiredReason:
                     throw StatusError("The hold on this booking has expired, so it was cancelled and can no longer be paid.");
+                case BookingStatus.Cancelled when booking.CancellationReason == Booking.StartPassedReason:
+                    throw StatusError(StartPassedMessage);
                 case BookingStatus.Confirmed:
                     throw StatusError("This booking has already been paid and confirmed.");
                 default:
@@ -310,8 +322,8 @@ public sealed class BookingService(IApplicationDbContext db, TimeProvider timePr
     }
 
     /// <summary>
-    /// Runs a status change on one booking under the court lock. An expired hold is cancelled first and
-    /// that is saved even if the change itself is then rejected.
+    /// Runs a status change on one booking under the court lock. An expired hold is cancelled first; that, and
+    /// any cancellation the change makes before rejecting the request, is saved even if the change is rejected.
     /// </summary>
     private async Task<BookingResponse> ChangeAsync(
         Guid bookingId,
@@ -376,10 +388,41 @@ public sealed class BookingService(IApplicationDbContext db, TimeProvider timePr
     }
 
     /// <summary>
-    /// Cancels every Pending booking in scope whose hold has run out. A single conditional UPDATE, so it can
-    /// never overwrite a booking that was confirmed in the meantime. Mirrors <see cref="Booking.ExpireHold"/>.
+    /// Cancels the expired holds in scope before a read. Nothing is written unless a read-only check finds
+    /// expired holds; then the courts they belong to are locked (in a fixed order, so concurrent sweeps cannot
+    /// deadlock) and the holds are cancelled under those locks, like every other booking write.
     /// </summary>
-    private Task<int> ExpireHoldsAsync(
+    private async Task ExpireHoldsAsync(Expression<Func<Booking, bool>> scope, CancellationToken cancellationToken)
+    {
+        var cutoff = UtcNow - Hold;
+        var courtIds = await db.Bookings
+            .Where(scope)
+            .Where(b => b.Status == BookingStatus.Pending && b.CreatedAtUtc <= cutoff)
+            .Select(b => b.CourtId)
+            .Distinct()
+            .OrderBy(id => id)
+            .ToListAsync(cancellationToken);
+        if (courtIds.Count == 0)
+        {
+            return;
+        }
+
+        await using var transaction = await db.BeginTransactionAsync(IsolationLevel.ReadCommitted, cancellationToken);
+        foreach (var courtId in courtIds)
+        {
+            await db.LockCourtForUpdateAsync(courtId, cancellationToken);
+        }
+
+        await ExpireHoldsUnderLockAsync(courtIds, scope, UtcNow, cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+    }
+
+    /// <summary>
+    /// Cancels every expired Pending booking in scope on the given courts, whose rows the caller has locked.
+    /// A single conditional UPDATE; mirrors <see cref="Booking.ExpireHold"/>.
+    /// </summary>
+    private Task<int> ExpireHoldsUnderLockAsync(
+        IReadOnlyCollection<Guid> lockedCourtIds,
         Expression<Func<Booking, bool>> scope,
         DateTime now,
         CancellationToken cancellationToken)
@@ -387,7 +430,9 @@ public sealed class BookingService(IApplicationDbContext db, TimeProvider timePr
         var cutoff = now - Hold;
         return db.Bookings
             .Where(scope)
-            .Where(b => b.Status == BookingStatus.Pending && b.CreatedAtUtc <= cutoff)
+            .Where(b => lockedCourtIds.Contains(b.CourtId)
+                        && b.Status == BookingStatus.Pending
+                        && b.CreatedAtUtc <= cutoff)
             .ExecuteUpdateAsync(
                 s => s
                     .SetProperty(b => b.Status, BookingStatus.Cancelled)

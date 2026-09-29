@@ -100,6 +100,42 @@ public sealed class BookingLifecycleTests
         Assert.Equal(BookingStatus.Pending, booking.Status);
     }
 
+    [Theory]
+    [InlineData(0)]  // start time reached
+    [InlineData(5)]  // start time passed, hold still running
+    public void Confirm_AtOrAfterStart_IsRejected(int minutesAfterStart)
+    {
+        // Created 10 minutes before the start, so the 15-minute hold is still running at the start.
+        var courtSport = new CourtSport(Guid.NewGuid(), Guid.NewGuid(), 100_000m, "VND", Created);
+        var booking = new Booking(Guid.NewGuid(), courtSport, Start, End, 100_000m, Start.AddMinutes(-10));
+
+        Assert.Throws<DomainException>(() => booking.Confirm(Hold, Start.AddMinutes(minutesAfterStart)));
+        Assert.Equal(BookingStatus.Pending, booking.Status);
+    }
+
+    [Fact]
+    public void CancelUnpaidAfterStart_CancelsWithReason_OnlyOnceStarted()
+    {
+        var booking = Create();
+
+        Assert.Throws<DomainException>(() => booking.CancelUnpaidAfterStart(Start.AddMinutes(-1)));
+        booking.CancelUnpaidAfterStart(Start);
+
+        Assert.Equal(BookingStatus.Cancelled, booking.Status);
+        Assert.Equal(Booking.StartPassedReason, booking.CancellationReason);
+        Assert.Equal(Start, booking.CancelledAtUtc);
+        Assert.Throws<DomainException>(() => booking.CancelUnpaidAfterStart(Start.AddMinutes(1)));
+    }
+
+    [Fact]
+    public void CancelUnpaidAfterStart_RejectsConfirmedBooking()
+    {
+        var booking = Confirmed();
+
+        Assert.Throws<DomainException>(() => booking.CancelUnpaidAfterStart(Start));
+        Assert.Equal(BookingStatus.Confirmed, booking.Status);
+    }
+
     [Fact]
     public void Confirm_NonPending_IsRejected()
     {

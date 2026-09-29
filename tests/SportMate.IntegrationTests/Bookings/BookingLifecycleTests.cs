@@ -52,6 +52,31 @@ public sealed class BookingLifecycleTests(SportMateApiFactory factory) : IClassF
         await CreateCourtTests.AssertValidationErrorAsync(again, "status");
     }
 
+    [Theory]
+    [InlineData(0)]  // start time reached
+    [InlineData(30)] // start time passed
+    public async Task Pay_AtOrAfterStart_WithHoldStillRunning_Returns400AndCancelsTheBooking(int minutesSinceStart)
+    {
+        using var client = factory.CreateClient();
+        var (_, user, booking) = await ArrangeBookingAsync(client);
+        // The hold (created just now) is still running; only the start time has been reached.
+        var start = DateTime.UtcNow.AddMinutes(-minutesSinceStart);
+        await factory.SetBookingTimesAsync(booking.Id, startsAtUtc: start, endsAtUtc: start.AddHours(2));
+
+        using var response = await ActionAsync(client, user.AccessToken, booking.Id, "pay");
+
+        await CreateCourtTests.AssertValidationErrorAsync(response, "status");
+        var stored = await StoredAsync(booking.Id);
+        Assert.Equal(BookingStatus.Cancelled, stored.Status);
+        Assert.Equal(Booking.StartPassedReason, stored.CancellationReason);
+        Assert.NotNull(stored.CancelledAtUtc);
+        Assert.True(stored.CreatedAtUtc.AddMinutes(15) > DateTime.UtcNow); // it was not the hold that ended it
+
+        using var again = await ActionAsync(client, user.AccessToken, booking.Id, "pay");
+        await CreateCourtTests.AssertValidationErrorAsync(again, "status");
+        Assert.Equal(Booking.StartPassedReason, (await StoredAsync(booking.Id)).CancellationReason);
+    }
+
     [Fact]
     public async Task Pay_AlreadyConfirmed_Returns400()
     {
