@@ -1,6 +1,6 @@
 # SportMate Backend
 
-ASP.NET Core Web API foundation targeting .NET 10 LTS, with Clean Architecture projects, EF Core/Pomelo for MySQL, development Swagger, JWT authentication with rotating refresh tokens, user profile endpoints, court management (including court sports and weekly operating hours), and sports with user sport profiles.
+ASP.NET Core Web API foundation targeting .NET 10 LTS, with Clean Architecture projects, EF Core/Pomelo for MySQL, development Swagger, JWT authentication with rotating refresh tokens, user profile endpoints, court management (including court sports and weekly operating hours), sports with user sport profiles, and court bookings with a 15-minute hold and mock payment.
 
 ## Requirements
 
@@ -28,6 +28,7 @@ $env:ConnectionStrings__DefaultConnection = 'Server=localhost;Port=3306;Database
 | `Jwt:Audience` | `Jwt__Audience` | `SportMate` | |
 | `Jwt:AccessTokenMinutes` | `Jwt__AccessTokenMinutes` | `15` | 1-1440 |
 | `Jwt:RefreshTokenDays` | `Jwt__RefreshTokenDays` | `30` | 1-365 |
+| `Booking:HoldDurationMinutes` | `Booking__HoldDurationMinutes` | `15` | 1-1440. How long a new (Pending) booking holds the court. |
 
 Generate a local signing key (PowerShell):
 
@@ -78,6 +79,14 @@ JSON uses snake_case property names. Errors are RFC 7807 problem details; valida
 | POST | `/api/v1/courts/{courtId}/sports` | Bearer, Admin or assigned CourtOwner | 201 court sport + `Location` | 400, 401, 403, 404, 409 already added |
 | PUT | `/api/v1/courts/{courtId}/sports/{sportId}` | Bearer, Admin or assigned CourtOwner | 200 court sport | 400, 401, 403, 404 |
 | DELETE | `/api/v1/courts/{courtId}/sports/{sportId}` | Bearer, Admin or assigned CourtOwner | 204 (deactivates) | 401, 403, 404 court |
+| POST | `/api/v1/bookings` | Bearer | 201 booking (Pending) + `Location` | 400, 401, 404 court sport, 409 court already booked |
+| GET | `/api/v1/bookings/me` | Bearer | 200 caller's bookings | 401 |
+| GET | `/api/v1/bookings/{id}` | Bearer, booker / court's owner / Admin | 200 booking | 401, 404 |
+| POST | `/api/v1/bookings/{id}/pay` | Bearer, booker | 200 booking (Confirmed) | 400, 401, 403, 404 |
+| POST | `/api/v1/bookings/{id}/cancel` | Bearer, booker / court's owner / Admin | 200 booking (Cancelled) | 400, 401, 404 |
+| POST | `/api/v1/bookings/{id}/complete` | Bearer, court's owner / Admin | 200 booking (Completed) | 400, 401, 403, 404 |
+| POST | `/api/v1/bookings/{id}/no-show` | Bearer, court's owner / Admin | 200 booking (NoShow) | 400, 401, 403, 404 |
+| GET | `/api/v1/courts/{courtId}/bookings` | Bearer, Admin or assigned CourtOwner | 200 court's bookings | 401, 403, 404 |
 | GET | `/api/v1/courts/{courtId}/operating-hours` | Bearer, Admin or assigned CourtOwner | 200 periods | 401, 403, 404 |
 | POST | `/api/v1/courts/{courtId}/operating-hours` | Bearer, Admin or assigned CourtOwner | 201 period + `Location` | 400, 401, 403, 404, 409 concurrent change |
 | PUT | `/api/v1/courts/{courtId}/operating-hours/{id}` | Bearer, Admin or assigned CourtOwner | 200 period | 400, 401, 403, 404, 409 concurrent change |
@@ -280,6 +289,48 @@ Period object (GET returns all of the court's periods ordered by day, then openi
 - PUT replaces the period (it may move to another day); DELETE removes it permanently. A period id that does not belong to the court in the path is 404.
 - Timestamps are set by the server.
 
+### Bookings
+
+Rules in [docs/BUSINESS_RULES.md](../docs/BUSINESS_RULES.md) section 11. Any authenticated user books for themselves.
+
+```json
+POST /api/v1/bookings
+{ "court_sport_id": "<court sport id>", "starts_at": "2026-10-06T10:00:00+07:00", "ends_at": "2026-10-06T11:30:00+07:00" }
+```
+
+Booking object returned by every booking endpoint:
+
+```json
+{
+  "id": "…", "user_id": "…", "court_id": "…", "court_sport_id": "…",
+  "sport": { "id": "…", "name": "Tennis", "slug": "tennis", "is_active": true },
+  "starts_at_utc": "2026-10-06T03:00:00Z", "ends_at_utc": "2026-10-06T04:30:00Z",
+  "time_zone_id": "Asia/Ho_Chi_Minh", "local_date": "2026-10-06", "local_start_time": "10:00", "local_end_time": "11:30",
+  "status": "pending", "total_price": 150000.00, "currency": "VND",
+  "hold_expires_at_utc": "…", "cancellation_reason": null, "cancelled_at_utc": null,
+  "created_at_utc": "…", "updated_at_utc": "…"
+}
+```
+
+`status` is `pending`, `confirmed`, `cancelled`, `completed` or `no_show`. `hold_expires_at_utc` (`created_at_utc` + hold duration) is present only while Pending. `local_*` are the court's wall-clock times.
+
+- **Hold:** a new booking is `pending` and blocks the court for `Booking:HoldDurationMinutes` (15). An expired hold is cancelled with reason `Hold expired` the next time bookings of that court or user are read or changed; there is no background job.
+- **Pay (mock):** `POST /bookings/{id}/pay` has no body and takes no money; it only turns a Pending booking with a running hold into `confirmed`. Booker only (Admin/CourtOwner get 403). Expired hold, or a booking that is not Pending: 400 on `status`.
+- **Cancel:** `POST /bookings/{id}/cancel` with optional `{ "reason": "…" }` (max 500). Pending or Confirmed, before the start. 400 on `status` otherwise.
+- **Complete / no-show:** `POST /bookings/{id}/complete` and `/no-show`, no body. Confirmed bookings after their end, by the court's owner or an Admin (the booker gets 403).
+- **Visibility:** a booking someone may not see is 404. `GET /bookings/me` and `GET /courts/{courtId}/bookings` are ordered by start time.
+
+Create validation (400 unless noted):
+
+- `court_sport_id` required; unknown: 404. The court, price, currency and status come from the server; any other body fields are ignored.
+- `starts_at` / `ends_at`: ISO-8601 with `Z` or `±hh:mm`; no seconds or fractions. Start before end, start in the future.
+- Court, court sport and sport must be active (error on `court_sport_id`).
+- In the court's local time zone: one local day (no crossing midnight), entirely inside the union of that day's operating periods (touching periods are continuous, gaps are not), not at an ambiguous local time and not across a daylight-saving change.
+- `total_price = price_per_hour × minutes / 60`, rounded to 2 decimals away from zero; it must fit `DECIMAL(10,2)`.
+- Overlap with a Confirmed booking or a running hold on the **same physical court** (any sport): 409.
+
+Concurrency: creation and every status change run in a `READ COMMITTED` transaction that first locks the court row with `SELECT … FOR UPDATE`, then re-reads the court, court sport, sport and hours, expires stale holds and checks for overlaps. The conflict query uses the existing `(court_id, starts_at_utc, ends_at_utc)` index.
+
 ### Tokens
 
 - Access token: HS256 JWT with `sub` (user id), `email`, `role`, `jti`, `iat`, `nbf`, `exp`, `iss`, `aud`. Validated with 30 seconds clock skew.
@@ -329,7 +380,7 @@ MySQL 8.0.16 or later is required (CHECK constraints are enforced from that vers
 ## Project layout
 
 - `src/SportMate.Domain`: entities, enums and domain invariants.
-- `src/SportMate.Application`: use cases (`AuthService`, `UserService`, `CourtService`, `CourtSportService`, `CourtOperatingHourService`, `SportService`, `UserSportProfileService`), request/response DTOs, validation, and the interfaces Infrastructure implements.
+- `src/SportMate.Application`: use cases (`AuthService`, `UserService`, `CourtService`, `CourtSportService`, `CourtOperatingHourService`, `SportService`, `UserSportProfileService`, `BookingService`), request/response DTOs, validation, and the interfaces Infrastructure implements.
 - `src/SportMate.Infrastructure`: `SportMateDbContext`, entity configurations, migrations, MySQL registration, password hashing and JWT creation.
 - `src/SportMate.API`: controllers, JWT validation, Swagger, and exception-to-problem-details middleware.
 - `tests/`: unit and API integration test projects.
@@ -342,6 +393,12 @@ dotnet test backend/SportMate.sln
 
 - `tests/SportMate.UnitTests`: domain rules and input validation/token helpers.
 - `tests/SportMate.IntegrationTests`: the full HTTP pipeline via `WebApplicationFactory`, against a SQLite in-memory database created from the EF model (unique indexes, foreign keys and check constraints are enforced). No MySQL or secrets are needed; the tests use a test-only signing key.
+- `Bookings/MySqlBookingConcurrencyTests`: booking concurrency against **real MySQL**, because SQLite has no row locks. They run only when `SPORTMATE_TEST_MYSQL` holds a MySQL connection string for an account allowed to `CREATE`/`DROP DATABASE`; otherwise they are reported as skipped. Each run creates a throwaway `sm_test_<random>` database with the real migrations and drops it afterwards. Keep the connection string in the environment only:
+
+```powershell
+$env:SPORTMATE_TEST_MYSQL = 'Server=localhost;Port=3306;User ID=<user>;Password=<password>;'
+dotnet test backend/tests/SportMate.IntegrationTests --filter "FullyQualifiedName~MySqlBookingConcurrencyTests"
+```
 
 Run only the authentication and user tests:
 

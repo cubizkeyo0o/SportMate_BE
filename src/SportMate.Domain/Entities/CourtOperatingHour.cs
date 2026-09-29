@@ -48,6 +48,33 @@ public sealed class CourtOperatingHour : Entity
         DayOfWeek == dayOfWeek && OpensAt < closesAt && ClosesAt > opensAt;
 
     /// <summary>
+    /// Whether <paramref name="from"/>-<paramref name="to"/> lies entirely inside the union of the given
+    /// periods of one day. Touching periods count as continuous; a gap between periods breaks coverage.
+    /// </summary>
+    public static bool Covers(IEnumerable<CourtOperatingHour> periodsOfDay, TimeOnly from, TimeOnly to)
+    {
+        if (from >= to)
+        {
+            return false;
+        }
+
+        var reached = from;
+        foreach (var period in periodsOfDay.OrderBy(p => p.OpensAt))
+        {
+            if (period.OpensAt <= reached && period.ClosesAt > reached)
+            {
+                reached = period.ClosesAt;
+                if (reached >= to)
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
     /// Replaces the period. Callers must check it does not overlap the court's other periods.
     /// Setting the current values is a no-op.
     /// </summary>

@@ -15,9 +15,10 @@ namespace SportMate.IntegrationTests.Infrastructure;
 
 /// <summary>
 /// Runs the real API pipeline against a shared SQLite in-memory database created from the EF model,
-/// so unique indexes, foreign keys and check constraints are enforced.
+/// so unique indexes, foreign keys and check constraints are enforced. <see cref="MySqlApiFactory"/>
+/// swaps the database for a real MySQL one where row locking matters.
 /// </summary>
-public sealed class SportMateApiFactory : WebApplicationFactory<Program>
+public class SportMateApiFactory : WebApplicationFactory<Program>
 {
     // Test-only key; real keys come from the Jwt__SigningKey environment variable.
     public const string SigningKey = "integration-tests-only-signing-key-0123456789";
@@ -37,12 +38,24 @@ public sealed class SportMateApiFactory : WebApplicationFactory<Program>
         {
             services.RemoveAll<DbContextOptions<SportMateDbContext>>();
             services.RemoveAll<IDbContextOptionsConfiguration<SportMateDbContext>>();
-            services.AddDbContext<SportMateDbContext>(options => options.UseSqlite(connection));
+            ConfigureDatabase(services);
             services.AddControllers().AddApplicationPart(typeof(RoleProbeController).Assembly);
         });
     }
 
     protected override IHost CreateHost(IHostBuilder builder)
+    {
+        PrepareDatabase();
+        var host = base.CreateHost(builder);
+        using var scope = host.Services.CreateScope();
+        InitializeDatabase(scope.ServiceProvider.GetRequiredService<SportMateDbContext>());
+        return host;
+    }
+
+    protected virtual void ConfigureDatabase(IServiceCollection services) =>
+        services.AddDbContext<SportMateDbContext>(options => options.UseSqlite(connection));
+
+    protected virtual void PrepareDatabase()
     {
         connection.Open();
 
@@ -50,12 +63,9 @@ public sealed class SportMateApiFactory : WebApplicationFactory<Program>
         connection.CreateCollation(
             "utf8mb4_0900_ai_ci",
             (x, y) => string.Compare(x, y, StringComparison.OrdinalIgnoreCase));
-
-        var host = base.CreateHost(builder);
-        using var scope = host.Services.CreateScope();
-        scope.ServiceProvider.GetRequiredService<SportMateDbContext>().Database.EnsureCreated();
-        return host;
     }
+
+    protected virtual void InitializeDatabase(SportMateDbContext db) => db.Database.EnsureCreated();
 
     public async Task WithDbAsync(Func<SportMateDbContext, Task> action)
     {
@@ -94,6 +104,36 @@ public sealed class SportMateApiFactory : WebApplicationFactory<Program>
     public Task SetSportActiveAsync(Guid sportId, bool isActive) => WithDbAsync(async db =>
     {
         (await db.Sports.SingleAsync(s => s.Id == sportId)).SetActive(isActive, DateTime.UtcNow);
+        await db.SaveChangesAsync();
+    });
+
+    /// <summary>
+    /// Moves a booking in time (tests cannot wait for holds to expire or bookings to end). Writes the
+    /// columns directly, bypassing the domain, which never lets these values change.
+    /// </summary>
+    public Task SetBookingTimesAsync(
+        Guid bookingId,
+        DateTime? createdAtUtc = null,
+        DateTime? startsAtUtc = null,
+        DateTime? endsAtUtc = null) => WithDbAsync(async db =>
+    {
+        var booking = await db.Bookings.SingleAsync(b => b.Id == bookingId);
+        var entry = db.Entry(booking);
+        if (createdAtUtc is not null)
+        {
+            entry.Property(b => b.CreatedAtUtc).CurrentValue = createdAtUtc.Value;
+        }
+
+        if (startsAtUtc is not null)
+        {
+            entry.Property(b => b.StartsAtUtc).CurrentValue = startsAtUtc.Value;
+        }
+
+        if (endsAtUtc is not null)
+        {
+            entry.Property(b => b.EndsAtUtc).CurrentValue = endsAtUtc.Value;
+        }
+
         await db.SaveChangesAsync();
     });
 

@@ -1,4 +1,6 @@
+using System.Data;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 using SportMate.Application;
 using SportMate.Domain.Entities;
 using SportMate.Infrastructure.Persistence.Conventions;
@@ -27,6 +29,27 @@ public sealed class SportMateDbContext(DbContextOptions<SportMateDbContext> opti
     public DbSet<PlayRequest> PlayRequests => Set<PlayRequest>();
 
     public DbSet<PlayRequestParticipant> PlayRequestParticipants => Set<PlayRequestParticipant>();
+
+    public Task<IDbContextTransaction> BeginTransactionAsync(
+        IsolationLevel isolationLevel,
+        CancellationToken cancellationToken) =>
+        Database.BeginTransactionAsync(isolationLevel, cancellationToken);
+
+    public async Task LockCourtForUpdateAsync(Guid courtId, CancellationToken cancellationToken)
+    {
+        if (Database.CurrentTransaction is null)
+        {
+            throw new InvalidOperationException("The court row can only be locked inside a transaction.");
+        }
+
+        // SQLite (used only by the integration tests) has no row locks; it serializes writers itself.
+        if (Database.IsMySql())
+        {
+            await Database.ExecuteSqlInterpolatedAsync(
+                $"SELECT id FROM courts WHERE id = {courtId} FOR UPDATE",
+                cancellationToken);
+        }
+    }
 
     protected override void ConfigureConventions(ModelConfigurationBuilder configurationBuilder)
     {

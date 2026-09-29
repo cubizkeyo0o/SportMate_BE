@@ -8,16 +8,23 @@ namespace SportMate.Domain.Entities;
 /// history is preserved through <see cref="Status"/>.
 /// </summary>
 /// <remarks>
-/// Overlap checks alone are not safe under concurrency. Callers creating or modifying
-/// a booking must lock the <c>courts</c> row (SELECT ... FOR UPDATE) inside a transaction
-/// before checking for overlaps.
+/// A new booking is <see cref="BookingStatus.Pending"/>: a hold on the court that lasts a configured
+/// duration from <see cref="CreatedAtUtc"/> and becomes <see cref="BookingStatus.Confirmed"/> when paid.
+/// An unpaid hold expires and is cancelled. Overlap checks alone are not safe under concurrency: callers
+/// creating a booking must lock the <c>courts</c> row (SELECT ... FOR UPDATE) inside a transaction first.
 /// </remarks>
 public sealed class Booking : Entity
 {
     public const int CancellationReasonMaxLength = 500;
 
     /// <summary>
-    /// Statuses that block availability of the physical court.
+    /// Cancellation reason recorded when an unpaid hold runs out.
+    /// </summary>
+    public const string HoldExpiredReason = "Hold expired";
+
+    /// <summary>
+    /// Statuses that can block availability of the physical court. A Pending booking blocks only while
+    /// its hold is running (see <see cref="BlocksAvailabilityAt"/>).
     /// </summary>
     public static readonly IReadOnlyList<BookingStatus> BlockingStatuses =
         [BookingStatus.Pending, BookingStatus.Confirmed];
@@ -67,6 +74,9 @@ public sealed class Booking : Entity
 
     public DateTime EndsAtUtc { get; private set; }
 
+    /// <summary>
+    /// Price snapshot taken at creation; later court-sport price changes do not affect it.
+    /// </summary>
     public decimal TotalPrice { get; private set; }
 
     public string Currency { get; private set; } = null!;
@@ -81,43 +91,122 @@ public sealed class Booking : Entity
 
     public DateTime UpdatedAtUtc { get; private set; }
 
+    /// <summary>
+    /// Status-only view: Pending or Confirmed. Use <see cref="BlocksAvailabilityAt"/> for conflict decisions.
+    /// </summary>
     public bool BlocksAvailability => BlockingStatuses.Contains(Status);
+
+    /// <summary>
+    /// <c>price_per_hour * minutes / 60</c>, rounded to 2 decimals, midpoint away from zero.
+    /// </summary>
+    public static decimal CalculateTotalPrice(decimal pricePerHour, DateTime startsAtUtc, DateTime endsAtUtc)
+    {
+        var minutes = (decimal)(endsAtUtc - startsAtUtc).Ticks / TimeSpan.TicksPerMinute;
+        return decimal.Round(pricePerHour * minutes / 60m, 2, MidpointRounding.AwayFromZero);
+    }
+
+    /// <summary>
+    /// When the hold of a Pending booking ends: <see cref="CreatedAtUtc"/> plus the hold duration.
+    /// </summary>
+    public DateTime HoldExpiresAtUtc(TimeSpan holdDuration) => CreatedAtUtc + holdDuration;
+
+    public bool IsHoldExpired(TimeSpan holdDuration, DateTime utcNow) =>
+        Status == BookingStatus.Pending && HoldExpiresAtUtc(holdDuration) <= utcNow;
+
+    /// <summary>
+    /// Confirmed bookings, and Pending bookings whose hold is still running, occupy the court.
+    /// </summary>
+    public bool BlocksAvailabilityAt(TimeSpan holdDuration, DateTime utcNow) =>
+        Status == BookingStatus.Confirmed
+        || (Status == BookingStatus.Pending && !IsHoldExpired(holdDuration, utcNow));
 
     public bool Overlaps(DateTime requestedStartUtc, DateTime requestedEndUtc) =>
         StartsAtUtc < requestedEndUtc && EndsAtUtc > requestedStartUtc;
 
-    public void Confirm(DateTime utcNow)
+    /// <summary>
+    /// Cancels a Pending booking whose hold has run out. Returns false (and changes nothing) otherwise.
+    /// </summary>
+    public bool ExpireHold(TimeSpan holdDuration, DateTime utcNow)
     {
-        EnsureStatus(BookingStatus.Pending, "Only pending bookings can be confirmed.");
-        Status = BookingStatus.Confirmed;
-        UpdatedAtUtc = Guard.Utc(utcNow, nameof(utcNow));
+        Guard.Utc(utcNow, nameof(utcNow));
+        if (!IsHoldExpired(holdDuration, utcNow))
+        {
+            return false;
+        }
+
+        Status = BookingStatus.Cancelled;
+        CancellationReason = HoldExpiredReason;
+        CancelledAtUtc = utcNow;
+        UpdatedAtUtc = utcNow;
+        return true;
     }
 
+    /// <summary>
+    /// Mock payment: Pending → Confirmed while the hold is running.
+    /// </summary>
+    public void Confirm(TimeSpan holdDuration, DateTime utcNow)
+    {
+        Guard.Utc(utcNow, nameof(utcNow));
+        EnsureStatus(BookingStatus.Pending, "Only pending bookings can be confirmed.");
+        if (IsHoldExpired(holdDuration, utcNow))
+        {
+            throw new DomainException("The hold of this booking has expired.");
+        }
+
+        Status = BookingStatus.Confirmed;
+        UpdatedAtUtc = utcNow;
+    }
+
+    /// <summary>
+    /// Pending or Confirmed → Cancelled, only before the booking starts.
+    /// </summary>
     public void Cancel(string? reason, DateTime utcNow)
     {
+        Guard.Utc(utcNow, nameof(utcNow));
         if (!BlocksAvailability)
         {
             throw new DomainException("Only pending or confirmed bookings can be cancelled.");
         }
 
+        if (utcNow >= StartsAtUtc)
+        {
+            throw new DomainException("A booking cannot be cancelled once it has started.");
+        }
+
         Status = BookingStatus.Cancelled;
         CancellationReason = Guard.Optional(reason, CancellationReasonMaxLength, nameof(reason));
-        CancelledAtUtc = Guard.Utc(utcNow, nameof(utcNow));
+        CancelledAtUtc = utcNow;
         UpdatedAtUtc = utcNow;
     }
 
+    /// <summary>
+    /// Confirmed → Completed, only once the booking has ended.
+    /// </summary>
     public void Complete(DateTime utcNow)
     {
-        EnsureStatus(BookingStatus.Confirmed, "Only confirmed bookings can be completed.");
+        EnsureEndedConfirmed(utcNow, "completed");
         Status = BookingStatus.Completed;
-        UpdatedAtUtc = Guard.Utc(utcNow, nameof(utcNow));
+        UpdatedAtUtc = utcNow;
     }
 
+    /// <summary>
+    /// Confirmed → NoShow, only once the booking has ended.
+    /// </summary>
     public void MarkNoShow(DateTime utcNow)
     {
-        EnsureStatus(BookingStatus.Confirmed, "Only confirmed bookings can be marked as no-show.");
+        EnsureEndedConfirmed(utcNow, "marked as no-show");
         Status = BookingStatus.NoShow;
-        UpdatedAtUtc = Guard.Utc(utcNow, nameof(utcNow));
+        UpdatedAtUtc = utcNow;
+    }
+
+    private void EnsureEndedConfirmed(DateTime utcNow, string action)
+    {
+        Guard.Utc(utcNow, nameof(utcNow));
+        EnsureStatus(BookingStatus.Confirmed, $"Only confirmed bookings can be {action}.");
+        if (utcNow < EndsAtUtc)
+        {
+            throw new DomainException($"A booking can only be {action} after it has ended.");
+        }
     }
 
     private void EnsureStatus(BookingStatus expected, string message)

@@ -4,6 +4,8 @@ internal sealed class ValidationErrors
 {
     private readonly Dictionary<string, List<string>> errors = [];
 
+    public bool HasErrors => errors.Count > 0;
+
     public void Add(string field, string message)
     {
         if (!errors.TryGetValue(field, out var messages))

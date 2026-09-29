@@ -1,5 +1,7 @@
+using System.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Storage;
 using SportMate.Domain.Entities;
 
 namespace SportMate.Application;
@@ -23,7 +25,18 @@ public interface IApplicationDbContext
 
     DbSet<UserSportProfile> UserSportProfiles { get; }
 
+    DbSet<Booking> Bookings { get; }
+
     DatabaseFacade Database { get; }
 
     Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
+
+    Task<IDbContextTransaction> BeginTransactionAsync(IsolationLevel isolationLevel, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Takes an exclusive row lock on the court (MySQL: <c>SELECT ... FOR UPDATE</c>) that lasts until the
+    /// current transaction ends. This is the serialization point for booking changes on one physical court.
+    /// Must be called inside a transaction.
+    /// </summary>
+    Task LockCourtForUpdateAsync(Guid courtId, CancellationToken cancellationToken);
 }

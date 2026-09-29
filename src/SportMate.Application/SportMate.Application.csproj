@@ -7,6 +7,8 @@
   <ItemGroup>
     <!-- DbSet/async LINQ for IApplicationDbContext; same version Infrastructure already uses. -->
     <PackageReference Include="Microsoft.EntityFrameworkCore" Version="9.0.0" />
+    <!-- Binds BookingOptions from the "Booking" configuration section in AddSportMateApplication. -->
+    <PackageReference Include="Microsoft.Extensions.Options.ConfigurationExtensions" Version="9.0.0" />
   </ItemGroup>
 
   <ItemGroup>
