@@ -1,0 +1,6 @@
+@SportMate.API_HostAddress = http://localhost:5210
+
+GET {{SportMate.API_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
