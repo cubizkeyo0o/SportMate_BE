@@ -32,10 +32,20 @@ public sealed class UserSportProfile : Entity
 
     public DateTime UpdatedAtUtc { get; private set; }
 
+    /// <summary>
+    /// Setting the current skill level is a no-op.
+    /// </summary>
     public void ChangeSkillLevel(SkillLevel skillLevel, DateTime utcNow)
     {
-        SkillLevel = ValidSkill(skillLevel);
-        UpdatedAtUtc = Guard.Utc(utcNow, nameof(utcNow));
+        ValidSkill(skillLevel);
+        Guard.Utc(utcNow, nameof(utcNow));
+        if (skillLevel == SkillLevel)
+        {
+            return;
+        }
+
+        SkillLevel = skillLevel;
+        UpdatedAtUtc = utcNow;
     }
 
     private static SkillLevel ValidSkill(SkillLevel skillLevel) =>

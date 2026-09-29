@@ -15,6 +15,10 @@ public interface IApplicationDbContext
 
     DbSet<Court> Courts { get; }
 
+    DbSet<Sport> Sports { get; }
+
+    DbSet<UserSportProfile> UserSportProfiles { get; }
+
     DatabaseFacade Database { get; }
 
     Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);

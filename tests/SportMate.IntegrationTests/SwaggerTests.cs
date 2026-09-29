@@ -28,6 +28,10 @@ public sealed class SwaggerTests(SportMateApiFactory factory) : IClassFixture<Sp
         Assert.True(RequiresBearer(paths, "/api/v1/courts", "post"));
         Assert.True(RequiresBearer(paths, "/api/v1/courts/{id}", "get"));
         Assert.True(RequiresBearer(paths, "/api/v1/courts/{id}", "put"));
+        Assert.True(RequiresBearer(paths, "/api/v1/sports", "get"));
+        Assert.True(RequiresBearer(paths, "/api/v1/users/me/sports", "get"));
+        Assert.True(RequiresBearer(paths, "/api/v1/users/me/sports/{sportId}", "put"));
+        Assert.True(RequiresBearer(paths, "/api/v1/users/me/sports/{sportId}", "delete"));
         Assert.False(RequiresBearer(paths, "/api/v1/auth/login", "post"));
         Assert.False(RequiresBearer(paths, "/api/v1/auth/register", "post"));
         Assert.False(RequiresBearer(paths, "/api/v1/auth/refresh", "post"));

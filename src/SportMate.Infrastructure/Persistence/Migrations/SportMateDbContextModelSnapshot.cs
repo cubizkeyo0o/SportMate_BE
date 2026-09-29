@@ -475,6 +475,16 @@ namespace SportMate.Infrastructure.Persistence.Migrations
                         .HasColumnName("name")
                         .UseCollation("utf8mb4_0900_ai_ci");
 
+                    b.Property<string>("Slug")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("varchar(50)")
+                        .HasColumnName("slug");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("datetime(6)")
+                        .HasColumnName("updated_at_utc");
+
                     b.HasKey("Id")
                         .HasName("pk_sports");
 
@@ -482,7 +492,76 @@ namespace SportMate.Infrastructure.Persistence.Migrations
                         .IsUnique()
                         .HasDatabaseName("ix_sports_name");
 
+                    b.HasIndex("Slug")
+                        .IsUnique()
+                        .HasDatabaseName("ix_sports_slug");
+
                     b.ToTable("sports", (string)null);
+
+                    b.HasData(
+                        new
+                        {
+                            Id = new Guid("0b1e7a6e-5c2a-4f4e-9a01-000000000001"),
+                            CreatedAtUtc = new DateTime(2026, 9, 29, 0, 0, 0, 0, DateTimeKind.Utc),
+                            IsActive = true,
+                            Name = "Tennis",
+                            Slug = "tennis",
+                            UpdatedAtUtc = new DateTime(2026, 9, 29, 0, 0, 0, 0, DateTimeKind.Utc)
+                        },
+                        new
+                        {
+                            Id = new Guid("0b1e7a6e-5c2a-4f4e-9a01-000000000002"),
+                            CreatedAtUtc = new DateTime(2026, 9, 29, 0, 0, 0, 0, DateTimeKind.Utc),
+                            IsActive = true,
+                            Name = "Badminton",
+                            Slug = "badminton",
+                            UpdatedAtUtc = new DateTime(2026, 9, 29, 0, 0, 0, 0, DateTimeKind.Utc)
+                        },
+                        new
+                        {
+                            Id = new Guid("0b1e7a6e-5c2a-4f4e-9a01-000000000003"),
+                            CreatedAtUtc = new DateTime(2026, 9, 29, 0, 0, 0, 0, DateTimeKind.Utc),
+                            IsActive = true,
+                            Name = "Basketball",
+                            Slug = "basketball",
+                            UpdatedAtUtc = new DateTime(2026, 9, 29, 0, 0, 0, 0, DateTimeKind.Utc)
+                        },
+                        new
+                        {
+                            Id = new Guid("0b1e7a6e-5c2a-4f4e-9a01-000000000004"),
+                            CreatedAtUtc = new DateTime(2026, 9, 29, 0, 0, 0, 0, DateTimeKind.Utc),
+                            IsActive = true,
+                            Name = "Football",
+                            Slug = "football",
+                            UpdatedAtUtc = new DateTime(2026, 9, 29, 0, 0, 0, 0, DateTimeKind.Utc)
+                        },
+                        new
+                        {
+                            Id = new Guid("0b1e7a6e-5c2a-4f4e-9a01-000000000005"),
+                            CreatedAtUtc = new DateTime(2026, 9, 29, 0, 0, 0, 0, DateTimeKind.Utc),
+                            IsActive = true,
+                            Name = "Pickleball",
+                            Slug = "pickleball",
+                            UpdatedAtUtc = new DateTime(2026, 9, 29, 0, 0, 0, 0, DateTimeKind.Utc)
+                        },
+                        new
+                        {
+                            Id = new Guid("0b1e7a6e-5c2a-4f4e-9a01-000000000006"),
+                            CreatedAtUtc = new DateTime(2026, 9, 29, 0, 0, 0, 0, DateTimeKind.Utc),
+                            IsActive = true,
+                            Name = "Table Tennis",
+                            Slug = "table-tennis",
+                            UpdatedAtUtc = new DateTime(2026, 9, 29, 0, 0, 0, 0, DateTimeKind.Utc)
+                        },
+                        new
+                        {
+                            Id = new Guid("0b1e7a6e-5c2a-4f4e-9a01-000000000007"),
+                            CreatedAtUtc = new DateTime(2026, 9, 29, 0, 0, 0, 0, DateTimeKind.Utc),
+                            IsActive = true,
+                            Name = "Volleyball",
+                            Slug = "volleyball",
+                            UpdatedAtUtc = new DateTime(2026, 9, 29, 0, 0, 0, 0, DateTimeKind.Utc)
+                        });
                 });
 
             modelBuilder.Entity("SportMate.Domain.Entities.User", b =>

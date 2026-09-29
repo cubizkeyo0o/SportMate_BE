@@ -7,6 +7,7 @@ using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
+using SportMate.Domain.Entities;
 using SportMate.Domain.Enums;
 using SportMate.Infrastructure.Persistence;
 
@@ -71,6 +72,28 @@ public sealed class SportMateApiFactory : WebApplicationFactory<Program>
     public Task SuspendAsync(Guid userId) => WithDbAsync(async db =>
     {
         (await db.Users.SingleAsync(u => u.Id == userId)).Suspend(DateTime.UtcNow);
+        await db.SaveChangesAsync();
+    });
+
+    /// <summary>
+    /// Adds a uniquely named sport, so tests can deactivate it without touching the shared seed data.
+    /// </summary>
+    public async Task<Sport> AddSportAsync(bool isActive = true, string? name = null)
+    {
+        var suffix = Guid.NewGuid().ToString("N")[..12];
+        var sport = new Sport(name ?? $"Test Sport {suffix}", $"test-sport-{suffix}", DateTime.UtcNow);
+        sport.SetActive(isActive, DateTime.UtcNow);
+        await WithDbAsync(async db =>
+        {
+            db.Sports.Add(sport);
+            await db.SaveChangesAsync();
+        });
+        return sport;
+    }
+
+    public Task SetSportActiveAsync(Guid sportId, bool isActive) => WithDbAsync(async db =>
+    {
+        (await db.Sports.SingleAsync(s => s.Id == sportId)).SetActive(isActive, DateTime.UtcNow);
         await db.SaveChangesAsync();
     });
 

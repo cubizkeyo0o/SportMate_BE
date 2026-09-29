@@ -1,6 +1,6 @@
 # SportMate Backend
 
-ASP.NET Core Web API foundation targeting .NET 10 LTS, with Clean Architecture projects, EF Core/Pomelo for MySQL, development Swagger, JWT authentication with rotating refresh tokens, user profile endpoints, and court management.
+ASP.NET Core Web API foundation targeting .NET 10 LTS, with Clean Architecture projects, EF Core/Pomelo for MySQL, development Swagger, JWT authentication with rotating refresh tokens, user profile endpoints, court management, and sports with user sport profiles.
 
 ## Requirements
 
@@ -67,6 +67,10 @@ JSON uses snake_case property names. Errors are RFC 7807 problem details; valida
 | POST | `/api/v1/auth/logout` | Bearer | 204 | 400, 401 |
 | GET | `/api/v1/users/me` | Bearer | 200 user | 401 |
 | PUT | `/api/v1/users/me` | Bearer | 200 user | 400, 401 |
+| GET | `/api/v1/sports` | Bearer | 200 active sports | 401 |
+| GET | `/api/v1/users/me/sports` | Bearer | 200 caller's sport profiles | 401 |
+| PUT | `/api/v1/users/me/sports/{sportId}` | Bearer | 200 profile (created or updated) | 400, 401, 404 unknown sport, 409 concurrent create |
+| DELETE | `/api/v1/users/me/sports/{sportId}` | Bearer | 204 (also when nothing to delete) | 401 |
 | POST | `/api/v1/courts` | Bearer, Admin | 201 court + `Location` | 400, 401, 403 |
 | GET | `/api/v1/courts/{id}` | Bearer, Admin or assigned CourtOwner | 200 court | 401, 403, 404 |
 | PUT | `/api/v1/courts/{id}` | Bearer, Admin or assigned CourtOwner | 200 court | 400, 401, 403, 404 |
@@ -129,6 +133,49 @@ Revokes the given refresh token if it belongs to the caller. Always returns 204 
 
 - `GET /api/v1/users/me` returns the user object above.
 - `PUT /api/v1/users/me` with `{ "display_name": "New Name", "phone": "0912345678" }` replaces the editable fields; omitting `phone` clears it. Any other fields (`email`, `status`, `id`, password) are ignored. Email change is not supported yet.
+
+### Sports and user sport profiles
+
+Sports are a fixed seeded catalog (rules in [docs/BUSINESS_RULES.md](../docs/BUSINESS_RULES.md) section 3); there is no create/update/delete API. All endpoints below need only a valid access token, so User, CourtOwner and Admin use them alike, and always for the caller's own profiles (the user id comes from the token, never the request).
+
+| Sport | Slug | Id |
+|---|---|---|
+| Tennis | `tennis` | `0b1e7a6e-5c2a-4f4e-9a01-000000000001` |
+| Badminton | `badminton` | `0b1e7a6e-5c2a-4f4e-9a01-000000000002` |
+| Basketball | `basketball` | `0b1e7a6e-5c2a-4f4e-9a01-000000000003` |
+| Football | `football` | `0b1e7a6e-5c2a-4f4e-9a01-000000000004` |
+| Pickleball | `pickleball` | `0b1e7a6e-5c2a-4f4e-9a01-000000000005` |
+| Table Tennis | `table-tennis` | `0b1e7a6e-5c2a-4f4e-9a01-000000000006` |
+| Volleyball | `volleyball` | `0b1e7a6e-5c2a-4f4e-9a01-000000000007` |
+
+`GET /api/v1/sports` returns the active sports ordered by name:
+
+```json
+[ { "id": "0b1e7a6e-5c2a-4f4e-9a01-000000000002", "name": "Badminton", "slug": "badminton" }, … ]
+```
+
+Skill levels: `beginner` (1), `elementary` (2), `intermediate` (3), `advanced` (4), `expert` (5). Requests may send the name or the number; responses always use the name.
+
+`PUT /api/v1/users/me/sports/{sportId}` creates the caller's profile for that sport or changes its skill level, and always returns 200 with the resulting profile. Repeating it is harmless.
+
+```json
+PUT /api/v1/users/me/sports/0b1e7a6e-5c2a-4f4e-9a01-000000000001
+{ "skill_level": "intermediate" }
+```
+
+```json
+{ "sport": { "id": "0b1e7a6e-5c2a-4f4e-9a01-000000000001", "name": "Tennis", "slug": "tennis", "is_active": true }, "skill_level": "intermediate" }
+```
+
+- `skill_level` missing or outside 1-5: 400 with an error on `skill_level`. An unknown name (for example `"pro"`): 400.
+- Unknown `sportId`: 404.
+- A new profile for an inactive sport: 400 with an error on `sport_id`. An existing profile whose sport was later deactivated can still be updated.
+- Any `user_id`, `id` or timestamp fields in the body are ignored.
+- Two simultaneous first-time PUTs for the same sport can make one fail with 409; retrying it succeeds.
+
+`GET /api/v1/users/me/sports` returns the caller's profiles (same item shape as the PUT response) ordered by sport name, or `[]`. Profiles of deactivated sports are included with `"is_active": false`.
+
+`DELETE /api/v1/users/me/sports/{sportId}` removes the caller's profile for that sport and returns 204. It also returns 204 when the caller has no such profile or the sport does not exist. The sport itself is never deleted.
 
 ### Courts
 
@@ -207,7 +254,7 @@ The change applies to the user's next request; no re-login is needed. Being a Co
 
 ## EF Core migrations
 
-Migrations live in `src/SportMate.Infrastructure/Persistence/Migrations`: `InitialCreate`, then `AddCourtCity` (adds `courts.city VARCHAR(100) NOT NULL`; existing rows get an empty string). Apply them to the configured database from the repository root:
+Migrations live in `src/SportMate.Infrastructure/Persistence/Migrations`: `InitialCreate`, then `AddCourtCity` (adds `courts.city VARCHAR(100) NOT NULL`; existing rows get an empty string), then `AddSportSlugAndSeed` (adds `sports.slug` with a unique index and `sports.updated_at_utc`, backfills any existing rows, and inserts the 7 seeded sports). Apply them to the configured database from the repository root:
 
 ```powershell
 dotnet ef database update --project backend/src/SportMate.Infrastructure --startup-project backend/src/SportMate.API
@@ -224,7 +271,7 @@ MySQL 8.0.16 or later is required (CHECK constraints are enforced from that vers
 ## Project layout
 
 - `src/SportMate.Domain`: entities, enums and domain invariants.
-- `src/SportMate.Application`: use cases (`AuthService`, `UserService`, `CourtService`), request/response DTOs, validation, and the interfaces Infrastructure implements.
+- `src/SportMate.Application`: use cases (`AuthService`, `UserService`, `CourtService`, `SportService`, `UserSportProfileService`), request/response DTOs, validation, and the interfaces Infrastructure implements.
 - `src/SportMate.Infrastructure`: `SportMateDbContext`, entity configurations, migrations, MySQL registration, password hashing and JWT creation.
 - `src/SportMate.API`: controllers, JWT validation, Swagger, and exception-to-problem-details middleware.
 - `tests/`: unit and API integration test projects.
