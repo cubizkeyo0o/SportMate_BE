@@ -28,6 +28,14 @@ public sealed class SwaggerTests(SportMateApiFactory factory) : IClassFixture<Sp
         Assert.True(RequiresBearer(paths, "/api/v1/courts", "post"));
         Assert.True(RequiresBearer(paths, "/api/v1/courts/{id}", "get"));
         Assert.True(RequiresBearer(paths, "/api/v1/courts/{id}", "put"));
+        Assert.True(RequiresBearer(paths, "/api/v1/courts/{courtId}/sports", "get"));
+        Assert.True(RequiresBearer(paths, "/api/v1/courts/{courtId}/sports", "post"));
+        Assert.True(RequiresBearer(paths, "/api/v1/courts/{courtId}/sports/{sportId}", "put"));
+        Assert.True(RequiresBearer(paths, "/api/v1/courts/{courtId}/sports/{sportId}", "delete"));
+        Assert.True(RequiresBearer(paths, "/api/v1/courts/{courtId}/operating-hours", "get"));
+        Assert.True(RequiresBearer(paths, "/api/v1/courts/{courtId}/operating-hours", "post"));
+        Assert.True(RequiresBearer(paths, "/api/v1/courts/{courtId}/operating-hours/{id}", "put"));
+        Assert.True(RequiresBearer(paths, "/api/v1/courts/{courtId}/operating-hours/{id}", "delete"));
         Assert.True(RequiresBearer(paths, "/api/v1/sports", "get"));
         Assert.True(RequiresBearer(paths, "/api/v1/users/me/sports", "get"));
         Assert.True(RequiresBearer(paths, "/api/v1/users/me/sports/{sportId}", "put"));

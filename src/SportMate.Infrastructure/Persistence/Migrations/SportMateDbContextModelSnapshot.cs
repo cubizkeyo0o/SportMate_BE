@@ -192,6 +192,10 @@ namespace SportMate.Infrastructure.Persistence.Migrations
                         .HasColumnType("char(36)")
                         .HasColumnName("court_id");
 
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("datetime(6)")
+                        .HasColumnName("created_at_utc");
+
                     b.Property<byte>("DayOfWeek")
                         .HasColumnType("tinyint unsigned")
                         .HasColumnName("day_of_week");
@@ -200,10 +204,15 @@ namespace SportMate.Infrastructure.Persistence.Migrations
                         .HasColumnType("time")
                         .HasColumnName("opens_at");
 
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("datetime(6)")
+                        .HasColumnName("updated_at_utc");
+
                     b.HasKey("Id")
                         .HasName("pk_court_operating_hours");
 
                     b.HasIndex("CourtId", "DayOfWeek", "OpensAt")
+                        .IsUnique()
                         .HasDatabaseName("ix_court_operating_hours_court_id_day_of_week_opens_at");
 
                     b.ToTable("court_operating_hours", null, t =>
@@ -265,7 +274,7 @@ namespace SportMate.Infrastructure.Persistence.Migrations
 
                     b.ToTable("court_sports", null, t =>
                         {
-                            t.HasCheckConstraint("ck_court_sports_price_per_hour", "price_per_hour > 0");
+                            t.HasCheckConstraint("ck_court_sports_price_per_hour", "price_per_hour >= 0");
                         });
                 });
 

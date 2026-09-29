@@ -15,6 +15,10 @@ public interface IApplicationDbContext
 
     DbSet<Court> Courts { get; }
 
+    DbSet<CourtSport> CourtSports { get; }
+
+    DbSet<CourtOperatingHour> CourtOperatingHours { get; }
+
     DbSet<Sport> Sports { get; }
 
     DbSet<UserSportProfile> UserSportProfiles { get; }

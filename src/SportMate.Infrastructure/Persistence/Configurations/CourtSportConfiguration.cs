@@ -9,7 +9,7 @@ internal sealed class CourtSportConfiguration : IEntityTypeConfiguration<CourtSp
     public void Configure(EntityTypeBuilder<CourtSport> builder)
     {
         builder.ToTable("court_sports", t =>
-            t.HasCheckConstraint("ck_court_sports_price_per_hour", "price_per_hour > 0"));
+            t.HasCheckConstraint("ck_court_sports_price_per_hour", "price_per_hour >= 0"));
         builder.HasKey(x => x.Id);
         builder.Property(x => x.Id).ValueGeneratedNever();
 
@@ -19,6 +19,7 @@ internal sealed class CourtSportConfiguration : IEntityTypeConfiguration<CourtSp
         builder.Property(x => x.CreatedAtUtc).IsRequired();
         builder.Property(x => x.UpdatedAtUtc).IsRequired();
 
+        // Court sports are deactivated, never deleted, so both relationships restrict deletes.
         builder.HasOne(x => x.Court)
             .WithMany(c => c.CourtSports)
             .HasForeignKey(x => x.CourtId)

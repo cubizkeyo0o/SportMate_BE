@@ -8,12 +8,12 @@ namespace SportMate.Application.Sports;
 public sealed record SportResponse(Guid Id, string Name, string Slug);
 
 /// <summary>
-/// The sport of a profile. <paramref name="IsActive"/> is false when the sport was deactivated after
-/// the profile was created.
+/// A sport referenced by a user profile or a court. <paramref name="IsActive"/> is false when the sport
+/// was deactivated after the reference was created.
 /// </summary>
-public sealed record ProfileSportResponse(Guid Id, string Name, string Slug, bool IsActive);
+public sealed record SportSummaryResponse(Guid Id, string Name, string Slug, bool IsActive);
 
-public sealed record UserSportProfileResponse(ProfileSportResponse Sport, SkillLevel SkillLevel);
+public sealed record UserSportProfileResponse(SportSummaryResponse Sport, SkillLevel SkillLevel);
 
 /// <summary>
 /// <paramref name="SkillLevel"/> accepts a name (<c>"beginner"</c>) or its stored number (1-5).

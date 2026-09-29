@@ -20,6 +20,8 @@ internal sealed class CourtOperatingHourConfiguration : IEntityTypeConfiguration
         builder.Property(x => x.DayOfWeek).HasConversion<byte>().IsRequired();
         builder.Property(x => x.OpensAt).IsRequired();
         builder.Property(x => x.ClosesAt).IsRequired();
+        builder.Property(x => x.CreatedAtUtc).IsRequired();
+        builder.Property(x => x.UpdatedAtUtc).IsRequired();
 
         // Operating hours are configuration of the court, not history.
         builder.HasOne(x => x.Court)
@@ -27,7 +29,8 @@ internal sealed class CourtOperatingHourConfiguration : IEntityTypeConfiguration
             .HasForeignKey(x => x.CourtId)
             .OnDelete(DeleteBehavior.Cascade);
 
-        // Several periods per day are allowed; overlap between them is validated in the application.
-        builder.HasIndex(x => new { x.CourtId, x.DayOfWeek, x.OpensAt });
+        // Several periods per day are allowed; the application rejects overlapping periods. The unique
+        // index is only a backstop (two periods of one day can never share an opening time).
+        builder.HasIndex(x => new { x.CourtId, x.DayOfWeek, x.OpensAt }).IsUnique();
     }
 }

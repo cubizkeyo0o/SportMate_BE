@@ -17,7 +17,7 @@ public sealed class UserSportProfileService(IApplicationDbContext db, TimeProvid
             .OrderBy(p => p.Sport.Name)
             .ThenBy(p => p.SportId)
             .Select(p => new UserSportProfileResponse(
-                new ProfileSportResponse(p.Sport.Id, p.Sport.Name, p.Sport.Slug, p.Sport.IsActive),
+                new SportSummaryResponse(p.Sport.Id, p.Sport.Name, p.Sport.Slug, p.Sport.IsActive),
                 p.SkillLevel))
             .ToListAsync(cancellationToken);
 
@@ -68,7 +68,7 @@ public sealed class UserSportProfileService(IApplicationDbContext db, TimeProvid
         }
 
         return new UserSportProfileResponse(
-            new ProfileSportResponse(sport.Id, sport.Name, sport.Slug, sport.IsActive),
+            new SportSummaryResponse(sport.Id, sport.Name, sport.Slug, sport.IsActive),
             skillLevel);
     }
 

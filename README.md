@@ -1,6 +1,6 @@
 # SportMate Backend
 
-ASP.NET Core Web API foundation targeting .NET 10 LTS, with Clean Architecture projects, EF Core/Pomelo for MySQL, development Swagger, JWT authentication with rotating refresh tokens, user profile endpoints, court management, and sports with user sport profiles.
+ASP.NET Core Web API foundation targeting .NET 10 LTS, with Clean Architecture projects, EF Core/Pomelo for MySQL, development Swagger, JWT authentication with rotating refresh tokens, user profile endpoints, court management (including court sports and weekly operating hours), and sports with user sport profiles.
 
 ## Requirements
 
@@ -74,6 +74,14 @@ JSON uses snake_case property names. Errors are RFC 7807 problem details; valida
 | POST | `/api/v1/courts` | Bearer, Admin | 201 court + `Location` | 400, 401, 403 |
 | GET | `/api/v1/courts/{id}` | Bearer, Admin or assigned CourtOwner | 200 court | 401, 403, 404 |
 | PUT | `/api/v1/courts/{id}` | Bearer, Admin or assigned CourtOwner | 200 court | 400, 401, 403, 404 |
+| GET | `/api/v1/courts/{courtId}/sports` | Bearer, Admin or assigned CourtOwner | 200 court sports | 401, 403, 404 |
+| POST | `/api/v1/courts/{courtId}/sports` | Bearer, Admin or assigned CourtOwner | 201 court sport + `Location` | 400, 401, 403, 404, 409 already added |
+| PUT | `/api/v1/courts/{courtId}/sports/{sportId}` | Bearer, Admin or assigned CourtOwner | 200 court sport | 400, 401, 403, 404 |
+| DELETE | `/api/v1/courts/{courtId}/sports/{sportId}` | Bearer, Admin or assigned CourtOwner | 204 (deactivates) | 401, 403, 404 court |
+| GET | `/api/v1/courts/{courtId}/operating-hours` | Bearer, Admin or assigned CourtOwner | 200 periods | 401, 403, 404 |
+| POST | `/api/v1/courts/{courtId}/operating-hours` | Bearer, Admin or assigned CourtOwner | 201 period + `Location` | 400, 401, 403, 404, 409 concurrent change |
+| PUT | `/api/v1/courts/{courtId}/operating-hours/{id}` | Bearer, Admin or assigned CourtOwner | 200 period | 400, 401, 403, 404, 409 concurrent change |
+| DELETE | `/api/v1/courts/{courtId}/operating-hours/{id}` | Bearer, Admin or assigned CourtOwner | 204 | 401, 403, 404 |
 
 ### Register
 
@@ -222,6 +230,56 @@ Validation (400, errors keyed by field):
 
 There is no court listing/search and no delete; setting `status` to `inactive` takes a court offline.
 
+### Court sports
+
+The sports a court offers, each with its own hourly price (rules in [docs/BUSINESS_RULES.md](../docs/BUSINESS_RULES.md) section 9). Same permissions as the court itself: Admin for any court, the assigned CourtOwner for their own courts, 403 for everyone else, checked against the caller's current database role. A relationship is addressed by the court and the sport id (see the sport table above).
+
+```json
+POST /api/v1/courts/{courtId}/sports
+{ "sport_id": "0b1e7a6e-5c2a-4f4e-9a01-000000000001", "price_per_hour": 150000, "currency": "VND" }
+```
+
+```json
+PUT /api/v1/courts/{courtId}/sports/{sportId}
+{ "price_per_hour": 120000, "currency": "VND", "is_active": true }
+```
+
+Court sport object (GET returns a list of these, ordered by sport name, including inactive ones):
+
+```json
+{ "sport": { "id": "…", "name": "Tennis", "slug": "tennis", "is_active": true }, "price_per_hour": 150000.00, "currency": "VND", "is_active": true, "created_at_utc": "…", "updated_at_utc": "…" }
+```
+
+`sport.is_active` is the sport's own state; `is_active` is whether this court offers it.
+
+- `price_per_hour`: required, `>= 0` (zero allowed), at most 2 decimal places and 99,999,999.99 (`DECIMAL(10,2)`). It is the price for one hour; booking-time price calculation is not implemented yet.
+- `currency`: required, exactly 3 letters, stored uppercase.
+- POST: unknown sport 404; inactive sport 400 on `sport_id`; the court already has that sport (active or not) 409, so reactivate it with PUT instead. New relationships start active.
+- PUT: replaces all three fields. `is_active: true` on an inactive relationship whose sport is inactive is 400 on `is_active`; price changes and deactivation are always allowed. A court without that sport is 404. Unchanged values leave `updated_at_utc` as it is.
+- DELETE deactivates the relationship (`is_active = false`) and keeps the row. It returns 204 when already inactive and when the court does not have that sport; only an unknown court is 404.
+- Timestamps and any other body fields (`court_id`, `owner_id`, …) are ignored; the court always comes from the path.
+
+### Court operating hours
+
+Recurring weekly opening periods in the court's local time (rules in [docs/BUSINESS_RULES.md](../docs/BUSINESS_RULES.md) section 10). Same permissions as court sports.
+
+```json
+POST /api/v1/courts/{courtId}/operating-hours
+{ "day_of_week": 1, "opens_at": "06:00", "closes_at": "12:00" }
+```
+
+Period object (GET returns all of the court's periods ordered by day, then opening time):
+
+```json
+{ "id": "…", "day_of_week": 1, "opens_at": "06:00", "closes_at": "12:00", "created_at_utc": "…", "updated_at_utc": "…" }
+```
+
+- `day_of_week`: required, `0` = Sunday … `6` = Saturday.
+- `opens_at` / `closes_at`: required, exactly `HH:mm` from `00:00` to `23:59` (seconds are rejected). `opens_at` must be earlier than `closes_at`, so a period cannot cross midnight, and `24:00` is not supported.
+- A period that overlaps another period of the same court on the same day is 400 on `opens_at`. Touching periods (`06:00–12:00` and `12:00–14:00`) are fine. A unique index on `(court_id, day_of_week, opens_at)` backs this up; losing a race against a concurrent change returns 409.
+- PUT replaces the period (it may move to another day); DELETE removes it permanently. A period id that does not belong to the court in the path is 404.
+- Timestamps are set by the server.
+
 ### Tokens
 
 - Access token: HS256 JWT with `sub` (user id), `email`, `role`, `jti`, `iat`, `nbf`, `exp`, `iss`, `aud`. Validated with 30 seconds clock skew.
@@ -254,7 +312,7 @@ The change applies to the user's next request; no re-login is needed. Being a Co
 
 ## EF Core migrations
 
-Migrations live in `src/SportMate.Infrastructure/Persistence/Migrations`: `InitialCreate`, then `AddCourtCity` (adds `courts.city VARCHAR(100) NOT NULL`; existing rows get an empty string), then `AddSportSlugAndSeed` (adds `sports.slug` with a unique index and `sports.updated_at_utc`, backfills any existing rows, and inserts the 7 seeded sports). Apply them to the configured database from the repository root:
+Migrations live in `src/SportMate.Infrastructure/Persistence/Migrations`: `InitialCreate`, then `AddCourtCity` (adds `courts.city VARCHAR(100) NOT NULL`; existing rows get an empty string), then `AddSportSlugAndSeed` (adds `sports.slug` with a unique index and `sports.updated_at_utc`, backfills any existing rows, and inserts the 7 seeded sports), then `CourtSportsAndOperatingHours` (relaxes `ck_court_sports_price_per_hour` to `>= 0`, adds `court_operating_hours.created_at_utc`/`updated_at_utc` backfilled with the migration time, and makes the `(court_id, day_of_week, opens_at)` index unique). Apply them to the configured database from the repository root:
 
 ```powershell
 dotnet ef database update --project backend/src/SportMate.Infrastructure --startup-project backend/src/SportMate.API
@@ -271,7 +329,7 @@ MySQL 8.0.16 or later is required (CHECK constraints are enforced from that vers
 ## Project layout
 
 - `src/SportMate.Domain`: entities, enums and domain invariants.
-- `src/SportMate.Application`: use cases (`AuthService`, `UserService`, `CourtService`, `SportService`, `UserSportProfileService`), request/response DTOs, validation, and the interfaces Infrastructure implements.
+- `src/SportMate.Application`: use cases (`AuthService`, `UserService`, `CourtService`, `CourtSportService`, `CourtOperatingHourService`, `SportService`, `UserSportProfileService`), request/response DTOs, validation, and the interfaces Infrastructure implements.
 - `src/SportMate.Infrastructure`: `SportMateDbContext`, entity configurations, migrations, MySQL registration, password hashing and JWT creation.
 - `src/SportMate.API`: controllers, JWT validation, Swagger, and exception-to-problem-details middleware.
 - `tests/`: unit and API integration test projects.

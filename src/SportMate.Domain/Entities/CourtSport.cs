@@ -3,7 +3,8 @@ using SportMate.Domain.Common;
 namespace SportMate.Domain.Entities;
 
 /// <summary>
-/// A sport offered on a physical court, with its own hourly price.
+/// A sport offered on a physical court, with its own hourly price. Never hard-deleted: removing a sport
+/// from a court deactivates the relationship so bookings keep referring to it.
 /// </summary>
 public sealed class CourtSport : Entity
 {
@@ -15,7 +16,7 @@ public sealed class CourtSport : Entity
     {
         CourtId = courtId;
         SportId = sportId;
-        PricePerHour = Guard.Money(pricePerHour, nameof(pricePerHour), allowZero: false);
+        PricePerHour = Guard.Money(pricePerHour, nameof(pricePerHour), allowZero: true);
         Currency = Guard.Currency(currency);
         IsActive = true;
         CreatedAtUtc = Guard.Utc(utcNow, nameof(utcNow));
@@ -40,16 +41,36 @@ public sealed class CourtSport : Entity
 
     public DateTime UpdatedAtUtc { get; private set; }
 
+    /// <summary>
+    /// The price is per hour and may be zero. Setting the current price is a no-op.
+    /// </summary>
     public void ChangePrice(decimal pricePerHour, string currency, DateTime utcNow)
     {
-        PricePerHour = Guard.Money(pricePerHour, nameof(pricePerHour), allowZero: false);
-        Currency = Guard.Currency(currency);
-        UpdatedAtUtc = Guard.Utc(utcNow, nameof(utcNow));
+        pricePerHour = Guard.Money(pricePerHour, nameof(pricePerHour), allowZero: true);
+        currency = Guard.Currency(currency);
+        Guard.Utc(utcNow, nameof(utcNow));
+        if (pricePerHour == PricePerHour && currency == Currency)
+        {
+            return;
+        }
+
+        PricePerHour = pricePerHour;
+        Currency = currency;
+        UpdatedAtUtc = utcNow;
     }
 
+    /// <summary>
+    /// Setting the current state is a no-op. Callers must not reactivate a relationship whose sport is inactive.
+    /// </summary>
     public void SetActive(bool isActive, DateTime utcNow)
     {
+        Guard.Utc(utcNow, nameof(utcNow));
+        if (isActive == IsActive)
+        {
+            return;
+        }
+
         IsActive = isActive;
-        UpdatedAtUtc = Guard.Utc(utcNow, nameof(utcNow));
+        UpdatedAtUtc = utcNow;
     }
 }

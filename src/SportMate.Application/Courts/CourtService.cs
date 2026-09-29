@@ -58,7 +58,7 @@ public sealed class CourtService(IApplicationDbContext db, TimeProvider timeProv
         var court = await db.Courts.AsNoTracking().FirstOrDefaultAsync(c => c.Id == courtId, cancellationToken)
             ?? throw new NotFoundException("Court not found.");
 
-        EnsureCanManage(court, actorId, actorRole);
+        CourtAccess.EnsureCanManage(court.OwnerId, actorId, actorRole);
         return CourtResponse.From(court);
     }
 
@@ -72,7 +72,7 @@ public sealed class CourtService(IApplicationDbContext db, TimeProvider timeProv
         var court = await db.Courts.FirstOrDefaultAsync(c => c.Id == courtId, cancellationToken)
             ?? throw new NotFoundException("Court not found.");
 
-        EnsureCanManage(court, actorId, actorRole);
+        CourtAccess.EnsureCanManage(court.OwnerId, actorId, actorRole);
 
         var changesOwner = request.OwnerId is { } requestedOwner && requestedOwner != court.OwnerId;
         if (changesOwner && actorRole != UserRole.Admin)
@@ -106,25 +106,6 @@ public sealed class CourtService(IApplicationDbContext db, TimeProvider timeProv
 
         await db.SaveChangesAsync(cancellationToken);
         return CourtResponse.From(court);
-    }
-
-    /// <summary>
-    /// Admin manages every court. A CourtOwner manages only courts whose stored owner is the caller;
-    /// an owner who has since lost the CourtOwner role manages nothing.
-    /// </summary>
-    private static void EnsureCanManage(Court court, Guid actorId, UserRole actorRole)
-    {
-        var allowed = actorRole switch
-        {
-            UserRole.Admin => true,
-            UserRole.CourtOwner => court.OwnerId == actorId,
-            _ => false
-        };
-
-        if (!allowed)
-        {
-            throw new ForbiddenException("You do not have permission to manage this court.");
-        }
     }
 
     private async Task ValidateOwnerAsync(Guid ownerId, ValidationErrors errors, CancellationToken cancellationToken)
