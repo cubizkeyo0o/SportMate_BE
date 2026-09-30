@@ -9,3 +9,7 @@ GRANT ALL PRIVILEGES ON sportmate.* TO 'sportmate_app'@'localhost';
 ```
 
 Set `ConnectionStrings__DefaultConnection` in the environment to a MySQL connection string. Do not commit passwords. Then apply the EF Core migrations as described in the backend README.
+
+## Development seed data
+
+For sample courts to try court discovery locally, see [seed/README.md](seed/README.md).
