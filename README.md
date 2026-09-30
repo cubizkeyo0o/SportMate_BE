@@ -258,8 +258,10 @@ No `owner_id` and no timestamps. A court without sports or hours is still listed
 `GET /api/v1/discovery/courts/{courtId}/sports` lists what can be booked there, ordered by sport name: only court sports that are active and whose sport is active. `is_active` is therefore always `true`.
 
 ```json
-[ { "sport": { "id": "…", "name": "Tennis", "slug": "tennis" }, "price_per_hour": 150000.00, "currency": "VND", "is_active": true } ]
+[ { "court_sport_id": "…", "sport": { "id": "…", "name": "Tennis", "slug": "tennis" }, "price_per_hour": 150000.00, "currency": "VND", "is_active": true } ]
 ```
+
+`court_sport_id` is the court-sport link to send as `court_sport_id` in `POST /api/v1/bookings`.
 
 `GET /api/v1/discovery/courts/{courtId}/operating-hours` lists the weekly periods exactly as configured, in the court's local time (not converted to UTC), ordered by day then opening time. `day_of_week` is `0` = Sunday … `6` = Saturday.
 

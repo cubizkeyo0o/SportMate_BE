@@ -50,6 +50,7 @@ public sealed class CourtDiscoveryService(IApplicationDbContext db)
             .OrderBy(cs => cs.Sport.Name)
             .ThenBy(cs => cs.SportId)
             .Select(cs => new DiscoveredCourtSportResponse(
+                cs.Id,
                 new SportResponse(cs.Sport.Id, cs.Sport.Name, cs.Sport.Slug),
                 cs.PricePerHour,
                 cs.Currency,

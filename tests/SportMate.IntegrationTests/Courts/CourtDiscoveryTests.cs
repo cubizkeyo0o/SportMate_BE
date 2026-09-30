@@ -223,8 +223,8 @@ public sealed class CourtDiscoveryTests(SportMateApiFactory factory) : IClassFix
         var sports = (await response.Content.ReadFromJsonAsync<List<CourtSportDto>>(AuthApi.Json))!;
         Assert.Equal(
             [
-                new CourtSportDto(new SportDto(BookingApi.Badminton, "Badminton", "badminton"), 80_000m, "VND", true),
-                new CourtSportDto(new SportDto(BookingApi.Tennis, "Tennis", "tennis"), 100_000m, "VND", true)
+                new CourtSportDto(court.BadmintonCourtSportId, new SportDto(BookingApi.Badminton, "Badminton", "badminton"), 80_000m, "VND", true),
+                new CourtSportDto(court.TennisCourtSportId, new SportDto(BookingApi.Tennis, "Tennis", "tennis"), 100_000m, "VND", true)
             ],
             sports);
     }
@@ -247,7 +247,7 @@ public sealed class CourtDiscoveryTests(SportMateApiFactory factory) : IClassFix
         var items = json.RootElement.EnumerateArray().ToList();
         Assert.All(items, item =>
         {
-            AssertExactFields(item, ["sport", "price_per_hour", "currency", "is_active"]);
+            AssertExactFields(item, ["court_sport_id", "sport", "price_per_hour", "currency", "is_active"]);
             AssertExactFields(item.GetProperty("sport"), ["id", "name", "slug"]);
         });
         var tennis = items.Single(i => i.GetProperty("sport").GetProperty("slug").GetString() == "tennis");
@@ -255,6 +255,41 @@ public sealed class CourtDiscoveryTests(SportMateApiFactory factory) : IClassFix
         Assert.Equal(125_000.50m, tennis.GetProperty("price_per_hour").GetDecimal());
         Assert.Equal("USD", tennis.GetProperty("currency").GetString());
         Assert.True(tennis.GetProperty("is_active").GetBoolean());
+    }
+
+    [Fact]
+    public async Task Sports_CourtSportId_IsTheRealLinkId_AndCanBeUsedToBook()
+    {
+        using var client = factory.CreateClient();
+        var court = await BookingApi.ArrangeCourtAsync(factory, client);
+        var otherCourt = await BookingApi.ArrangeCourtAsync(factory, client);
+        var user = await AuthApi.RegisterAndLoginAsync(client);
+
+        using var response = await GetAsync(client, user.AccessToken, $"{PathOf(court.Court.Id)}/sports");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var ids = json.RootElement.EnumerateArray()
+            .ToDictionary(i => i.GetProperty("sport").GetProperty("slug").GetString()!, i => i.GetProperty("court_sport_id").GetGuid());
+        Assert.Equal(court.TennisCourtSportId, ids["tennis"]);
+        Assert.Equal(court.BadmintonCourtSportId, ids["badminton"]);
+        Assert.DoesNotContain(otherCourt.TennisCourtSportId, ids.Values); // the other court's links are not mixed in
+        await factory.WithDbAsync(async db =>
+        {
+            foreach (var id in ids.Values)
+            {
+                var link = await db.CourtSports.FindAsync(id);
+                Assert.NotNull(link);
+                Assert.Equal(court.Court.Id, link.CourtId);
+            }
+        });
+
+        // The id is exactly what POST /api/v1/bookings expects in court_sport_id.
+        var day = BookingApi.LocalDate();
+        var booking = await BookingApi.CreateBookingAsync(client, user.AccessToken,
+            BookingApi.Body(ids["tennis"], BookingApi.VietnamTime(day, "10:00"), BookingApi.VietnamTime(day, "11:00")));
+        Assert.Equal(ids["tennis"], booking.CourtSportId);
+        Assert.Equal(court.Court.Id, booking.CourtId);
     }
 
     // ---- operating hours ----
@@ -380,7 +415,7 @@ public sealed class CourtDiscoveryTests(SportMateApiFactory factory) : IClassFix
 
     private sealed record SportDto(Guid Id, string Name, string Slug);
 
-    private sealed record CourtSportDto(SportDto Sport, decimal PricePerHour, string Currency, bool IsActive);
+    private sealed record CourtSportDto(Guid CourtSportId, SportDto Sport, decimal PricePerHour, string Currency, bool IsActive);
 
     private sealed record HourDto(int DayOfWeek, string OpensAt, string ClosesAt);
 }
