@@ -75,6 +75,10 @@ JSON uses snake_case property names. Errors are RFC 7807 problem details; valida
 | POST | `/api/v1/courts` | Bearer, Admin | 201 court + `Location` | 400, 401, 403 |
 | GET | `/api/v1/courts/{id}` | Bearer, Admin or assigned CourtOwner | 200 court | 401, 403, 404 |
 | PUT | `/api/v1/courts/{id}` | Bearer, Admin or assigned CourtOwner | 200 court | 400, 401, 403, 404 |
+| GET | `/api/v1/discovery/courts` | Bearer | 200 active courts | 401 |
+| GET | `/api/v1/discovery/courts/{courtId}` | Bearer | 200 court | 401, 404 inactive or unknown |
+| GET | `/api/v1/discovery/courts/{courtId}/sports` | Bearer | 200 offered sports | 401, 404 inactive or unknown |
+| GET | `/api/v1/discovery/courts/{courtId}/operating-hours` | Bearer | 200 weekly periods | 401, 404 inactive or unknown |
 | GET | `/api/v1/courts/{courtId}/sports` | Bearer, Admin or assigned CourtOwner | 200 court sports | 401, 403, 404 |
 | POST | `/api/v1/courts/{courtId}/sports` | Bearer, Admin or assigned CourtOwner | 201 court sport + `Location` | 400, 401, 403, 404, 409 already added |
 | PUT | `/api/v1/courts/{courtId}/sports/{sportId}` | Bearer, Admin or assigned CourtOwner | 200 court sport | 400, 401, 403, 404 |
@@ -239,6 +243,30 @@ Validation (400, errors keyed by field):
 
 There is no court listing/search and no delete; setting `status` to `inactive` takes a court offline.
 
+### Court discovery
+
+Read-only browsing for **every** authenticated user (User, CourtOwner, Admin), separate from the management endpoints above, which keep their own permissions and response shapes. Only `Active` courts exist here: an inactive or unknown court is 404 (the same response for both), even for its owner or an Admin. No filters, search or pagination yet.
+
+`GET /api/v1/discovery/courts` lists active courts ordered by name (`[]` when there are none); `GET /api/v1/discovery/courts/{courtId}` returns one:
+
+```json
+{ "id": "…", "name": "Tennis Court 01", "description": "Outdoor hard court", "address": "1 Tran Phu, Ba Dinh", "city": "Ha Noi", "latitude": 21.028511, "longitude": 105.804817, "time_zone_id": "Asia/Ho_Chi_Minh", "status": "active" }
+```
+
+No `owner_id` and no timestamps. A court without sports or hours is still listed.
+
+`GET /api/v1/discovery/courts/{courtId}/sports` lists what can be booked there, ordered by sport name: only court sports that are active and whose sport is active. `is_active` is therefore always `true`.
+
+```json
+[ { "sport": { "id": "…", "name": "Tennis", "slug": "tennis" }, "price_per_hour": 150000.00, "currency": "VND", "is_active": true } ]
+```
+
+`GET /api/v1/discovery/courts/{courtId}/operating-hours` lists the weekly periods exactly as configured, in the court's local time (not converted to UTC), ordered by day then opening time. `day_of_week` is `0` = Sunday … `6` = Saturday.
+
+```json
+[ { "day_of_week": 1, "opens_at": "06:00", "closes_at": "12:00" } ]
+```
+
 ### Court sports
 
 The sports a court offers, each with its own hourly price (rules in [docs/BUSINESS_RULES.md](../docs/BUSINESS_RULES.md) section 9). Same permissions as the court itself: Admin for any court, the assigned CourtOwner for their own courts, 403 for everyone else, checked against the caller's current database role. A relationship is addressed by the court and the sport id (see the sport table above).
@@ -380,7 +408,7 @@ MySQL 8.0.16 or later is required (CHECK constraints are enforced from that vers
 ## Project layout
 
 - `src/SportMate.Domain`: entities, enums and domain invariants.
-- `src/SportMate.Application`: use cases (`AuthService`, `UserService`, `CourtService`, `CourtSportService`, `CourtOperatingHourService`, `SportService`, `UserSportProfileService`, `BookingService`), request/response DTOs, validation, and the interfaces Infrastructure implements.
+- `src/SportMate.Application`: use cases (`AuthService`, `UserService`, `CourtService`, `CourtSportService`, `CourtOperatingHourService`, `CourtDiscoveryService`, `SportService`, `UserSportProfileService`, `BookingService`), request/response DTOs, validation, and the interfaces Infrastructure implements.
 - `src/SportMate.Infrastructure`: `SportMateDbContext`, entity configurations, migrations, MySQL registration, password hashing and JWT creation.
 - `src/SportMate.API`: controllers, JWT validation, Swagger, and exception-to-problem-details middleware.
 - `tests/`: unit and API integration test projects.

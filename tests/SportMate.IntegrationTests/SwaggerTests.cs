@@ -44,6 +44,10 @@ public sealed class SwaggerTests(SportMateApiFactory factory) : IClassFixture<Sp
         Assert.True(RequiresBearer(paths, "/api/v1/bookings/{id}/complete", "post"));
         Assert.True(RequiresBearer(paths, "/api/v1/bookings/{id}/no-show", "post"));
         Assert.True(RequiresBearer(paths, "/api/v1/courts/{courtId}/bookings", "get"));
+        Assert.True(RequiresBearer(paths, "/api/v1/discovery/courts", "get"));
+        Assert.True(RequiresBearer(paths, "/api/v1/discovery/courts/{courtId}", "get"));
+        Assert.True(RequiresBearer(paths, "/api/v1/discovery/courts/{courtId}/sports", "get"));
+        Assert.True(RequiresBearer(paths, "/api/v1/discovery/courts/{courtId}/operating-hours", "get"));
         Assert.True(RequiresBearer(paths, "/api/v1/sports", "get"));
         Assert.True(RequiresBearer(paths, "/api/v1/users/me/sports", "get"));
         Assert.True(RequiresBearer(paths, "/api/v1/users/me/sports/{sportId}", "put"));
