@@ -39,6 +39,37 @@ public sealed class PlayRequestTests
     }
 
     [Fact]
+    public void RequestToJoin_ReusesRejectedParticipantAndClearsResponseTime()
+    {
+        var request = CreateRequest(Guid.NewGuid(), 2);
+        var participant = request.RequestToJoin(Guid.NewGuid(), Now);
+        request.Reject(participant.Id, Now.AddMinutes(1));
+        var originalId = participant.Id;
+
+        var resubmitted = request.RequestToJoin(participant.UserId, Now.AddMinutes(2));
+
+        Assert.Same(participant, resubmitted);
+        Assert.Equal(originalId, resubmitted.Id);
+        Assert.Equal(ParticipantStatus.Pending, resubmitted.Status);
+        Assert.Null(resubmitted.RespondedAtUtc);
+        Assert.Single(request.Participants);
+    }
+
+    [Fact]
+    public void RequestToJoin_ReusesWithdrawnParticipant()
+    {
+        var request = CreateRequest(Guid.NewGuid(), 2);
+        var participant = request.RequestToJoin(Guid.NewGuid(), Now);
+        request.Withdraw(participant.UserId, Now.AddMinutes(1));
+
+        var resubmitted = request.RequestToJoin(participant.UserId, Now.AddMinutes(2));
+
+        Assert.Same(participant, resubmitted);
+        Assert.Equal(ParticipantStatus.Pending, resubmitted.Status);
+        Assert.Single(request.Participants);
+    }
+
+    [Fact]
     public void Accept_CannotExceedSpotsNeeded()
     {
         var request = CreateRequest(Guid.NewGuid(), 1);
@@ -72,5 +103,68 @@ public sealed class PlayRequestTests
 
         Assert.Throws<DomainException>(() =>
             request.SetSkillRange(SkillLevel.Advanced, SkillLevel.Beginner, Now));
+    }
+
+    [Fact]
+    public void SetSkillRange_RejectsChangesAfterAnyParticipantRecord()
+    {
+        var request = CreateRequest(Guid.NewGuid(), 2);
+        request.SetSkillRange(SkillLevel.Beginner, SkillLevel.Advanced, Now);
+        request.RequestToJoin(Guid.NewGuid(), Now);
+
+        Assert.Throws<DomainException>(() =>
+            request.SetSkillRange(SkillLevel.Intermediate, SkillLevel.Advanced, Now.AddMinutes(1)));
+    }
+
+    [Fact]
+    public void UpdateMatchingDetails_RejectsChangesAfterAnyParticipantRecord()
+    {
+        var request = CreateRequest(Guid.NewGuid(), 2);
+        request.RequestToJoin(Guid.NewGuid(), Now);
+
+        Assert.Throws<DomainException>(() => request.UpdateMatchingDetails(
+            request.SportId,
+            "Updated title",
+            Start.AddHours(1),
+            Start.AddHours(3),
+            request.SpotsNeeded,
+            request.Latitude,
+            request.Longitude,
+            request.MinSkillLevel,
+            request.MaxSkillLevel,
+            Now.AddMinutes(1)));
+    }
+
+    [Fact]
+    public void UpdateMatchingDetails_AllowsNonMatchingDescriptionEditsAfterParticipant()
+    {
+        var request = CreateRequest(Guid.NewGuid(), 2);
+        request.RequestToJoin(Guid.NewGuid(), Now);
+
+        request.UpdateMatchingDetails(
+            request.SportId,
+            request.Title,
+            request.StartsAtUtc,
+            request.EndsAtUtc,
+            request.SpotsNeeded,
+            request.Latitude,
+            request.Longitude,
+            request.MinSkillLevel,
+            request.MaxSkillLevel,
+            Now.AddMinutes(1));
+        request.SetDetails("Updated description", "Updated location", Now.AddMinutes(1));
+
+        Assert.Equal("Updated description", request.Description);
+        Assert.Equal("Updated location", request.LocationName);
+    }
+
+    [Fact]
+    public void Complete_TransitionsOpenRequestWithoutComparingCurrentTimeToStart()
+    {
+        var request = CreateRequest(Guid.NewGuid(), 2);
+
+        request.Complete(Start.AddDays(1));
+
+        Assert.Equal(PlayRequestStatus.Completed, request.Status);
     }
 }

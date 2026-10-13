@@ -3,6 +3,7 @@ using Microsoft.Extensions.Options;
 using SportMate.Application.Auth;
 using SportMate.Application.Bookings;
 using SportMate.Application.Courts;
+using SportMate.Application.PlayRequests;
 using SportMate.Application.Sports;
 using SportMate.Application.Users;
 
@@ -21,6 +22,7 @@ public static class DependencyInjection
         services.AddScoped<SportService>();
         services.AddScoped<UserSportProfileService>();
         services.AddScoped<BookingService>();
+        services.AddScoped<IPlayRequestService, PlayRequestService>();
 
         services.AddOptions<BookingOptions>()
             .BindConfiguration(BookingOptions.SectionName)

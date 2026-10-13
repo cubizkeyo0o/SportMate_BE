@@ -51,6 +51,22 @@ public sealed class SportMateDbContext(DbContextOptions<SportMateDbContext> opti
         }
     }
 
+    public async Task LockPlayRequestForUpdateAsync(Guid playRequestId, CancellationToken cancellationToken)
+    {
+        if (Database.CurrentTransaction is null)
+        {
+            throw new InvalidOperationException("The play request row can only be locked inside a transaction.");
+        }
+
+        // SQLite (used only by integration tests) serializes writers and has no row-level FOR UPDATE.
+        if (Database.IsMySql())
+        {
+            await Database.ExecuteSqlInterpolatedAsync(
+                $"SELECT id FROM play_requests WHERE id = {playRequestId} FOR UPDATE",
+                cancellationToken);
+        }
+    }
+
     protected override void ConfigureConventions(ModelConfigurationBuilder configurationBuilder)
     {
         configurationBuilder.Properties<Guid>().HaveColumnType("char(36)");

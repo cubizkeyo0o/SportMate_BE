@@ -1,6 +1,56 @@
 @SportMate.API_HostAddress = http://localhost:5210
+@accessToken = replace-with-access-token
+@playRequestId = replace-with-play-request-id
+@participantId = replace-with-participant-id
 
 GET {{SportMate.API_HostAddress}}/weatherforecast/
 Accept: application/json
+
+###
+
+GET {{SportMate.API_HostAddress}}/api/v1/play-requests?starts_from_utc=2099-06-01T00%3A00%3A00Z&page=1&page_size=20
+Authorization: Bearer {{accessToken}}
+Accept: application/json
+
+###
+
+POST {{SportMate.API_HostAddress}}/api/v1/play-requests
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "sport_id": "replace-with-sport-id",
+  "title": "Tennis after work",
+  "description": "Looking for another player",
+  "starts_at": "2099-06-01T17:00:00Z",
+  "ends_at": "2099-06-01T19:00:00Z",
+  "spots_needed": 1,
+  "latitude": 21.028511,
+  "longitude": 105.804817,
+  "min_skill_level": "beginner",
+  "max_skill_level": "advanced",
+  "location_name": "Ba Dinh"
+}
+
+###
+
+POST {{SportMate.API_HostAddress}}/api/v1/play-requests/{{playRequestId}}/participants
+Authorization: Bearer {{accessToken}}
+
+###
+
+GET {{SportMate.API_HostAddress}}/api/v1/play-requests/{{playRequestId}}/participants
+Authorization: Bearer {{accessToken}}
+Accept: application/json
+
+###
+
+POST {{SportMate.API_HostAddress}}/api/v1/play-requests/{{playRequestId}}/participants/{{participantId}}/accept
+Authorization: Bearer {{accessToken}}
+
+###
+
+POST {{SportMate.API_HostAddress}}/api/v1/play-requests/{{playRequestId}}/complete
+Authorization: Bearer {{accessToken}}
 
 ###

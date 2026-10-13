@@ -43,6 +43,7 @@ public sealed class PlayRequestParticipant : Entity
 
     internal void Withdraw(DateTime utcNow)
     {
+        Guard.Utc(utcNow, nameof(utcNow));
         if (Status is not (ParticipantStatus.Pending or ParticipantStatus.Accepted))
         {
             throw new DomainException("Only pending or accepted participants can withdraw.");
@@ -62,5 +63,17 @@ public sealed class PlayRequestParticipant : Entity
         Status = status;
         RespondedAtUtc = Guard.Utc(utcNow, nameof(utcNow));
         UpdatedAtUtc = utcNow;
+    }
+
+    internal void Resubmit(DateTime utcNow)
+    {
+        if (Status is not (ParticipantStatus.Rejected or ParticipantStatus.Withdrawn))
+        {
+            throw new DomainException("Only rejected or withdrawn participants can request to join again.");
+        }
+
+        Status = ParticipantStatus.Pending;
+        RespondedAtUtc = null;
+        UpdatedAtUtc = Guard.Utc(utcNow, nameof(utcNow));
     }
 }

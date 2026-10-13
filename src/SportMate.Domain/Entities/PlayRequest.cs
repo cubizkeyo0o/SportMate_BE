@@ -97,16 +97,57 @@ public sealed class PlayRequest : Entity
         UpdatedAtUtc = Guard.Utc(utcNow, nameof(utcNow));
     }
 
-    public void SetSkillRange(SkillLevel? min, SkillLevel? max, DateTime utcNow)
+    public void UpdateMatchingDetails(
+        Guid sportId,
+        string title,
+        DateTime startsAtUtc,
+        DateTime endsAtUtc,
+        byte spotsNeeded,
+        decimal latitude,
+        decimal longitude,
+        SkillLevel? minSkillLevel,
+        SkillLevel? maxSkillLevel,
+        DateTime utcNow)
     {
-        if ((min is { } a && !Enum.IsDefined(a)) || (max is { } b && !Enum.IsDefined(b)))
+        var normalizedTitle = Guard.NotBlank(title, TitleMaxLength, nameof(title));
+        Guard.UtcRange(startsAtUtc, endsAtUtc);
+        Guard.Coordinates(latitude, longitude);
+        Guard.Utc(utcNow, nameof(utcNow));
+        ValidateSpotsNeeded(spotsNeeded);
+        ValidateSkillRange(minSkillLevel, maxSkillLevel);
+
+        if (Participants.Count > 0
+            && (SportId != sportId
+                || Title != normalizedTitle
+                || StartsAtUtc != startsAtUtc
+                || EndsAtUtc != endsAtUtc
+                || SpotsNeeded != spotsNeeded
+                || Latitude != latitude
+                || Longitude != longitude
+                || MinSkillLevel != minSkillLevel
+                || MaxSkillLevel != maxSkillLevel))
         {
-            throw new DomainException("Invalid skill level.");
+            throw new DomainException("Matching details cannot be changed after a participant has requested to join.");
         }
 
-        if (min > max)
+        SportId = sportId;
+        Title = normalizedTitle;
+        StartsAtUtc = startsAtUtc;
+        EndsAtUtc = endsAtUtc;
+        SpotsNeeded = spotsNeeded;
+        Latitude = latitude;
+        Longitude = longitude;
+        MinSkillLevel = minSkillLevel;
+        MaxSkillLevel = maxSkillLevel;
+        UpdatedAtUtc = utcNow;
+    }
+
+    public void SetSkillRange(SkillLevel? min, SkillLevel? max, DateTime utcNow)
+    {
+        ValidateSkillRange(min, max);
+        if (Participants.Count > 0 && (MinSkillLevel != min || MaxSkillLevel != max))
         {
-            throw new DomainException("Minimum skill level cannot exceed maximum skill level.");
+            throw new DomainException("Skill requirements cannot be changed after a participant has requested to join.");
         }
 
         MinSkillLevel = min;
@@ -131,12 +172,15 @@ public sealed class PlayRequest : Entity
 
         if (Participants.Any(p => p.UserId == userId))
         {
-            throw new DomainException("The user has already requested to join.");
+            var existing = Participants.First(p => p.UserId == userId);
+            existing.Resubmit(utcNow);
+            UpdatedAtUtc = Guard.Utc(utcNow, nameof(utcNow));
+            return existing;
         }
 
         var participant = new PlayRequestParticipant(Id, userId, utcNow);
         Participants.Add(participant);
-        UpdatedAtUtc = utcNow;
+        UpdatedAtUtc = Guard.Utc(utcNow, nameof(utcNow));
         return participant;
     }
 
@@ -146,6 +190,7 @@ public sealed class PlayRequest : Entity
     /// </summary>
     public void Accept(Guid participantId, DateTime utcNow)
     {
+        Guard.Utc(utcNow, nameof(utcNow));
         var participant = FindParticipant(participantId);
         if (Status != PlayRequestStatus.Open)
         {
@@ -168,12 +213,16 @@ public sealed class PlayRequest : Entity
 
     public void Reject(Guid participantId, DateTime utcNow)
     {
+        Guard.Utc(utcNow, nameof(utcNow));
+        EnsureCanManageParticipants();
         FindParticipant(participantId).Reject(utcNow);
-        UpdatedAtUtc = utcNow;
+        UpdatedAtUtc = Guard.Utc(utcNow, nameof(utcNow));
     }
 
     public void Withdraw(Guid userId, DateTime utcNow)
     {
+        Guard.Utc(utcNow, nameof(utcNow));
+        EnsureCanManageParticipants();
         var participant = Participants.FirstOrDefault(p => p.UserId == userId)
             ?? throw new DomainException("The user is not a participant.");
         participant.Withdraw(utcNow);
@@ -182,11 +231,12 @@ public sealed class PlayRequest : Entity
             Status = PlayRequestStatus.Open;
         }
 
-        UpdatedAtUtc = utcNow;
+        UpdatedAtUtc = Guard.Utc(utcNow, nameof(utcNow));
     }
 
     public void Cancel(DateTime utcNow)
     {
+        Guard.Utc(utcNow, nameof(utcNow));
         if (Status is not (PlayRequestStatus.Open or PlayRequestStatus.Full))
         {
             throw new DomainException("Only open or full play requests can be cancelled.");
@@ -195,6 +245,46 @@ public sealed class PlayRequest : Entity
         Status = PlayRequestStatus.Cancelled;
         CancelledAtUtc = Guard.Utc(utcNow, nameof(utcNow));
         UpdatedAtUtc = utcNow;
+    }
+
+    public void Complete(DateTime utcNow)
+    {
+        if (Status is not (PlayRequestStatus.Open or PlayRequestStatus.Full))
+        {
+            throw new DomainException("Only open or full play requests can be completed.");
+        }
+
+        Status = PlayRequestStatus.Completed;
+        UpdatedAtUtc = Guard.Utc(utcNow, nameof(utcNow));
+    }
+
+    private void EnsureCanManageParticipants()
+    {
+        if (Status is not (PlayRequestStatus.Open or PlayRequestStatus.Full))
+        {
+            throw new DomainException("Participants cannot be changed on a cancelled or completed play request.");
+        }
+    }
+
+    private static void ValidateSpotsNeeded(byte spotsNeeded)
+    {
+        if (spotsNeeded == 0)
+        {
+            throw new DomainException("Spots needed must be positive.");
+        }
+    }
+
+    private static void ValidateSkillRange(SkillLevel? min, SkillLevel? max)
+    {
+        if ((min is { } a && !Enum.IsDefined(a)) || (max is { } b && !Enum.IsDefined(b)))
+        {
+            throw new DomainException("Invalid skill level.");
+        }
+
+        if (min > max)
+        {
+            throw new DomainException("Minimum skill level cannot exceed maximum skill level.");
+        }
     }
 
     private PlayRequestParticipant FindParticipant(Guid participantId) =>

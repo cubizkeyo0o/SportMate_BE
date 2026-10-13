@@ -27,6 +27,10 @@ public interface IApplicationDbContext
 
     DbSet<Booking> Bookings { get; }
 
+    DbSet<PlayRequest> PlayRequests { get; }
+
+    DbSet<PlayRequestParticipant> PlayRequestParticipants { get; }
+
     DatabaseFacade Database { get; }
 
     Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
@@ -39,4 +43,10 @@ public interface IApplicationDbContext
     /// Must be called inside a transaction.
     /// </summary>
     Task LockCourtForUpdateAsync(Guid courtId, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Takes an exclusive row lock on a play request until the current transaction ends. Must be called inside
+    /// a transaction before changing the request or its participants.
+    /// </summary>
+    Task LockPlayRequestForUpdateAsync(Guid playRequestId, CancellationToken cancellationToken);
 }
